@@ -29,12 +29,15 @@ canonical correlations from the dual eigendecomposition.}
 \item{\code{anchor_idx}}{integer vector, indices (into the original n subjects)
 of the fully-observed anchor subjects.}
 
-\item{\code{Y_anchor}}{labels of the anchor subjects, in \code{anchor_idx} order.}
+\item{\code{Y_anchor}}{integer class codes of the anchor subjects, in
+\code{anchor_idx} order.}
 
-\item{\code{Y_levels}}{sorted unique class labels seen during fitting.}
+\item{\code{Y_levels}}{sorted unique integer class codes seen during fitting.}
 
-\item{\code{Y_labels}}{optional original label names (e.g. \code{"CN"}), or
-\code{NULL} if \code{Y} was already numeric/integer.}
+\item{\code{Y_labels}}{character vector of class names,
+\code{levels(as.factor(Y))}, in code order (code 1 is
+\code{Y_labels[1]}). For numeric \code{Y} these are the numbers as
+strings, e.g. \code{c("1", "2", "3")}.}
 
 \item{\code{K}}{integer, latent dimension.}
 
@@ -42,8 +45,8 @@ of the fully-observed anchor subjects.}
 
 \item{\code{n}}{integer, total number of subjects.}
 
-\item{\code{mod_names}}{optional character vector of modality names, or
-\code{NULL} if \code{X_list} was unnamed.}
+\item{\code{mod_names}}{character vector of modality names; unnamed inputs get
+\code{"Modality 1"}, \code{"Modality 2"}, ...}
 
 \item{\code{lambdas}}{numeric vector of length V, per-modality Laplacian
 regularization strength used at fit time.}
@@ -70,5 +73,5 @@ advanced/diagnostic use.}
 }}
 
 \seealso{
-[woven()]
+[woven()] to fit a model; [woven-accessors] to read one.
 }

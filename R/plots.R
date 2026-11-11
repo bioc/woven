@@ -1,5 +1,5 @@
 # plots.R -- ggplot2-based publication-ready plots for WOVEN fits
-# ggplot2 is Suggests: every exported function checks for it at runtime.
+# ggplot2 is in Suggests: every plotting function calls .require_ggplot2().
 #
 # woven_plot_vip()      -- VIP scores per modality (lollipop chart)
 # woven_plot_loadings() -- Feature loadings for one latent dimension
@@ -25,19 +25,41 @@ utils::globalVariables(c(
     invisible(TRUE)
 }
 
-# Resolve modality argument: accepts integer index or name string
+# Resolve a modality argument (index or name) to a single valid index.
 .resolve_modality <- function(modality, fit) {
+    if (length(modality) != 1L || is.na(modality)) {
+        stop("modality must be a single modality index or name.", call. = FALSE)
+    }
     if (is.character(modality)) {
         idx <- match(modality, fit@mod_names)
         if (is.na(idx)) {
             stop(sprintf(
                 "Modality '%s' not found. Available: %s",
                 modality, paste(fit@mod_names, collapse = ", ")
-            ))
+            ), call. = FALSE)
         }
         return(idx)
     }
+    if (!is.numeric(modality) || modality != round(modality) ||
+        modality < 1L || modality > fit@V) {
+        stop(sprintf(
+            "modality must be an integer in 1..%d or one of: %s",
+            fit@V, paste(fit@mod_names, collapse = ", ")
+        ), call. = FALSE)
+    }
     as.integer(modality)
+}
+
+# Check that dim is a single latent dimension in 1..K.
+.check_dim <- function(dim, fit) {
+    if (length(dim) != 1L || !is.numeric(dim) || is.na(dim) ||
+        dim != round(dim) || dim < 1L || dim > fit@K) {
+        stop(sprintf(
+            "dim must be a single integer in 1..%d (the fit has K=%d dimensions).",
+            fit@K, fit@K
+        ), call. = FALSE)
+    }
+    as.integer(dim)
 }
 
 # Colorblind-safe palette (Wong 2011, Nature Methods)
@@ -67,7 +89,8 @@ utils::globalVariables(c(
 #' A dashed reference line at VIP = 1 marks above-average importance.
 #'
 #' @param fit woven object from [woven()]
-#' @param modality integer: which modality to plot (1..V, default 1)
+#' @param modality integer index (1..V) or name of the modality to plot
+#'   (default 1)
 #' @param n_top integer: number of top features to display (default 20)
 #' @param feature_names optional character vector of length p_v with feature
 #'   labels. If NULL, uses rownames of W_list[[modality]] or "Feature_j".
@@ -88,13 +111,13 @@ utils::globalVariables(c(
 #' X2[miss[, 2], ] <- NA
 #' fit <- woven(list(X1, X2), Y = Y, K = K)
 #' woven_plot_vip(fit, modality = 1L)
-#' @seealso [woven_plot_loadings()], [woven_plot_variance()], [woven_vip()]
+#' @seealso [woven_plot_loadings()], [woven_plot_variance()]
 #' @export
 woven_plot_vip <- function(fit, modality = 1L, n_top = 20L,
                            feature_names = NULL, main = NULL) {
-    stopifnot(inherits(fit, "woven"))
+    .require_ggplot2()
+    stopifnot(methods::is(fit, "woven"))
     modality <- .resolve_modality(modality, fit)
-    stopifnot(length(modality) == 1L, modality >= 1L, modality <= fit@V)
 
     W <- fit@W_list[[modality]]
     p <- nrow(W)
@@ -186,7 +209,8 @@ woven_plot_vip <- function(fit, modality = 1L, n_top = 20L,
 #' @param feature_names optional list of V character vectors (one per modality).
 #'   If a plain character vector is passed for a single-modality call, it is
 #'   used for that modality. If NULL, uses rownames of W or "Feature_j".
-#' @param modality integer or NULL: if specified, plot only that modality.
+#' @param modality NULL, or one or more modality indices or names: plot only
+#'   those modalities.
 #'   If NULL (default), all V modalities are shown in faceted panels.
 #' @param main character: plot title. If NULL, a default is used.
 #' @return a ggplot object (printed automatically; add layers with \code{+})
@@ -210,15 +234,15 @@ woven_plot_vip <- function(fit, modality = 1L, n_top = 20L,
 woven_plot_loadings <- function(fit, dim = 1L, n_top = 15L,
                                 feature_names = NULL, modality = NULL,
                                 main = NULL) {
-    stopifnot(inherits(fit, "woven"))
-    stopifnot(length(dim) == 1L, dim >= 1L, dim <= fit@K)
+    .require_ggplot2()
+    stopifnot(methods::is(fit, "woven"))
+    dim <- .check_dim(dim, fit)
 
     mod_seq <- if (is.null(modality)) {
         seq_len(fit@V)
     } else {
         vapply(modality, .resolve_modality, integer(1L), fit = fit)
     }
-    stopifnot(all(mod_seq >= 1L), all(mod_seq <= fit@V))
 
     # Build feature name list (length V)
     if (is.null(feature_names)) {
@@ -330,7 +354,8 @@ woven_plot_loadings <- function(fit, dim = 1L, n_top = 15L,
 #' @seealso [woven_plot_vip()], [woven_plot_loadings()]
 #' @export
 woven_plot_variance <- function(fit, main = "Variance Explained") {
-    stopifnot(inherits(fit, "woven"))
+    .require_ggplot2()
+    stopifnot(methods::is(fit, "woven"))
     svals <- fit@singular_values
     K <- fit@K
     prop_var <- svals^2 / sum(svals^2)

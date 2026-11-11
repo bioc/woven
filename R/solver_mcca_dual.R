@@ -1,76 +1,89 @@
-# solver_mcca_dual.R  -- Exact dual SUMCOR MCCA for WOVEN (V >= 2)
+# solver_mcca_dual.R -- closed-form dual SUMCOR MCCA for WOVEN (V >= 2)
 #
-# Unified closed-form dual for all V. Replaces woven_v2_dual (V=2 SVD) and
-# woven_als_dual (V>=3 ALS) with a single (V*n_a) x (V*n_a) eigendecomposition.
+# SUMCOR ("sum of correlations") multi-set CCA maximizes the sum of pairwise
+# correlations between the latent scores of all modality pairs. In the dual
+# (subject) space this has a closed-form solution from one eigendecomposition.
 #
-# Derivation:
-#   Primal (anchor-only B): B_v = X_a^T M_v X_a,  M_v = I + lambda_v L_a / n_a
-#   SUMCOR objective: max sum_{v<u} tr(Z_v^T IKY Z_u)  s.t. Z_v^T M_v Z_v = I_K
+# Derivation (anchor subjects only, n_a of them):
+#   M_v  = I + lambda_v L_a^(v) / n_a          graph-regularized metric, n_a x n_a
+#   IKY  = I + gamma_y K_Y                     label-augmented kernel, n_a x n_a
+#   objective: max sum_{v<u} tr(Z_v^T IKY Z_u)  s.t.  Z_v^T M_v Z_v = I_K
 #
-#   Block dual P (V*n_a x V*n_a, symmetric):
-#     P_{vu} = M_v^{-1/2} IKY M_u^{-1/2}  (v != u)
-#     P_{vv} = 0
+#   Block dual matrix P, (V n_a) x (V n_a), symmetric:
+#     P_vu = M_v^{-1/2} IKY M_u^{-1/2}   (v != u),   P_vv = 0
+#   The top-K eigenvectors phi of P give Z_v = M_v^{-1/2} phi_v.
+#   Projection matrices: W_v = X_a^T (X_a X_a^T + ridge)^{-1} Z_v (min-norm).
 #
-#   Equivalence proof (all V):
-#     Singular values of primal block = eigenvalues of P_dual.
-#     Follows from B_v^{-1/2} X_a_v^T = V_Fv U_Fv^T M_v^{-1/2}, with
-#     U_Fv unitary (full-row-rank X_a_v, p_v >= n_a) -- same argument as V=2.
+# Cost: building P is O(V^2 n_a^2); the eigendecomposition is O((V n_a)^3);
+# W recovery is O(V n_a^2 p_v).
 #
-#   V=2 reduces exactly: top singular values of M1^{-1/2} IKY M2^{-1/2} equal
-#     eigenvalues of the 2-block P_dual (off-diagonal blocks +-M1^{-1/2} IKY M2^{-1/2}).
-#
-#   Za_v = M_v^{-1/2} phi_v  (v-th block of top-K eigenvectors)
-#   W_v  = X_a_v^T K_v^{-1} Za_v  (min-norm solution, p_v x K)
-#
-# Cost:
-#   Build P:     O(V^2 n_a^2)   -- V^2 mat_sqrts + block multiplications
-#   Eigen:       O((V n_a)^3)   -- ARM B V=3 n_a=150: 450^3 ~ 91M ops (<1s)
-#   W recovery:  O(V n_a^2 p_v) -- dominated by X_a^T multiply
+# The solver is split into one internal helper per step:
+#   .anchor_laplacians()  -> n_a x n_a anchor Laplacians
+#   .metric_roots()       -> M_v, M_v^{1/2}, M_v^{-1/2}, chol(M_v)
+#   .label_kernel()       -> IKY
+#   .block_dual_matrix()  -> P
+#   .top_eigen()          -> top-K positive eigenpairs of P
+#   .anchor_scores()      -> M-orthonormal anchor scores Z_v
+#   .anova_screen()       -> optional supervised feature screening
+#   .recover_W()          -> projection matrix W_v
 
-#' Fit supervised WOVEN for V >= 2 views via dual SUMCOR MCCA (closed-form)
+#' Closed-form dual SUMCOR MCCA solver (low-level)
 #'
-#' Single eigendecomposition of a (V*n_a) x (V*n_a) block matrix. No iterations,
-#' no random restarts, no local optima. Unified solver for all V.
+#' The solver that \code{\link{woven}} calls internally. Most users should
+#' call \code{woven()}, which adds input standardization, automatic anchor
+#' detection, MultiAssayExperiment input, latent scores for every subject,
+#' and an S4 result object. \code{woven_mcca_dual()} is exported for
+#' method developers who want the raw solver output (anchor scores, metric
+#' matrices, anchor Laplacians) without that wrapping.
 #'
-#' @param X_list  list of V matrices, each n x p_v (NA rows = block-missing)
-#' @param anchor_idx integer vector of fully-observed subject indices
-#' @param Y vector of length n, class labels (required)
-#' @param K integer, number of latent dimensions
-#' @param lambdas numeric scalar or length-V vector, Laplacian regularization
-#' @param gamma_y numeric >= 0, label supervision strength
-#' @param k_nn integer, k-NN for Laplacian (ignored if La_list_precomp supplied)
-#' @param La_list_precomp optional list of pre-extracted n_a x n_a anchor Laplacians
-#' @param ridge_w numeric >= 0, relative ridge strength for the W recovery step
-#'   (Ka_reg = Ka_v + ridge_w * max(diag(Ka_v)) * I). Default 1e-8 is a pure
-#'   numerical-stability nudge (original behavior). Larger values shrink
-#'   W_v toward zero, trading anchor fit for reduced variance when p_v >> n_a
-#'   (v7 regularization; CV-selected like lambdas and gamma_y).
-#' @param screen_top integer or Inf, per-modality feature count for
-#'   univariate (ANOVA F-score vs Y) supervised pre-screening BEFORE the W
-#'   recovery step. Default Inf disables this (all features used, original
-#'   behavior). The eigendecomposition (Za_list) never depends on features --
-#'   only the Laplacians and label kernel -- so screening only changes the
-#'   W_v = X_a_v^T Ka_v^\{-1\} Za_v recovery: Ka_v = X_a_v X_a_v^T is built
-#'   from the screened columns only, which is a genuine re-fit of the
-#'   min-norm interpolation on a reduced feature set (not a post-hoc
-#'   truncation of an already-complete solution). Screened-out features get
-#'   an exact zero row in the returned W_v (same shape as unscreened, so
-#'   all downstream code -- project_all(), woven_scores() -- is unaffected).
-#' @param verbose logical
+#' The fit is a single eigendecomposition of a (V n_a) x (V n_a) block
+#' matrix, with no iterations, random restarts or local optima. SUMCOR
+#' ("sum of correlations") is the multi-set CCA criterion that maximizes the
+#' sum of pairwise correlations between the modalities' latent scores.
 #'
-#' @return list with W_list, Za_list, Xa_list, singular_values, and metadata.
-#'   Compatible with project_all() in benchmark_one_rep.R.
+#' @param X_list list of V matrices, each n x p_v. Rows that are entirely
+#'   \code{NA} mark subjects missing that modality (block-missing).
+#' @param anchor_idx integer vector of subjects observed in every modality.
+#'   Validated: indices must be distinct, within 1..n, and not block-missing
+#'   in any modality.
+#' @param Y vector of length n of class labels. Only \code{Y[anchor_idx]} is
+#'   used.
+#' @param K integer, number of latent dimensions. Each projection matrix has
+#'   rank at most \code{min(n_a, p_v)}; a warning is given when \code{K}
+#'   exceeds a modality's feature count.
+#' @param lambdas numeric scalar or length-V vector, Laplacian regularization.
+#' @param gamma_y numeric >= 0, label supervision strength.
+#' @param k_nn integer, k-NN graph size (ignored if \code{La_list_precomp}
+#'   is supplied).
+#' @param La_list_precomp optional list of V pre-extracted n_a x n_a anchor
+#'   Laplacians.
+#' @param ridge_w numeric >= 0, relative ridge strength in W recovery
+#'   (\code{ridge_w * max(diag(Ka_v))} is added to the diagonal of the anchor
+#'   Gram matrix \code{Ka_v}). The default 1e-8 only stabilizes the solve.
+#' @param screen_top integer or \code{Inf}; if finite, W recovery uses only
+#'   the \code{screen_top} features per modality with the largest ANOVA
+#'   F-statistic against \code{Y} on anchor subjects. Screened-out features
+#'   get a zero row in W.
+#' @param verbose logical, print progress messages.
+#'
+#' @return a list with components \code{W_list} (V matrices, p_v x K),
+#'   \code{Za_list} (V anchor score matrices, n_a x K), \code{Xa_list}
+#'   (anchor data used), \code{singular_values} (length K),
+#'   \code{M_list}, \code{L_a_list}, \code{anchor_idx}, \code{K}, \code{V},
+#'   \code{lambdas}, \code{gamma_y}, \code{k_nn}, \code{n}, \code{p_v}.
+#' @seealso [woven()]
 #' @examples
 #' set.seed(1)
 #' n <- 20
-#' K <- 2L
 #' X1 <- matrix(rnorm(n * 5), n, 5)
 #' X2 <- matrix(rnorm(n * 4), n, 4)
 #' X3 <- matrix(rnorm(n * 3), n, 3)
 #' Y <- rep(1:2, each = n / 2)
-#' anchor_idx <- seq_len(14L)
-#' fit <- woven_mcca_dual(list(X1, X2, X3), anchor_idx = anchor_idx, Y = Y, K = K)
-#' length(fit$W_list)
+#' fit <- woven_mcca_dual(list(X1, X2, X3),
+#'     anchor_idx = seq_len(14L), Y = Y,
+#'     K = 2L, verbose = FALSE
+#' )
+#' fit$singular_values
 #' @export
 woven_mcca_dual <- function(X_list, anchor_idx, Y,
                             K = 5L,
@@ -82,173 +95,57 @@ woven_mcca_dual <- function(X_list, anchor_idx, Y,
                             screen_top = Inf,
                             verbose = TRUE) {
     V <- length(X_list)
-    n <- nrow(X_list[[1]])
-    n_a <- length(anchor_idx)
+    n <- nrow(X_list[[1L]])
     check_woven_inputs(X_list, anchor_idx, K)
-    stopifnot(length(Y) == n)
-
+    anchor_idx <- as.integer(anchor_idx)
+    n_a <- length(anchor_idx)
+    if (length(Y) != n) {
+        stop(sprintf("length(Y) = %d but X_list has %d rows.", length(Y), n),
+            call. = FALSE
+        )
+    }
     if (length(lambdas) == 1L) lambdas <- rep(lambdas, V)
-    stopifnot(length(lambdas) == V)
-
+    if (length(lambdas) != V) {
+        stop(sprintf("lambdas must have length 1 or V = %d.", V), call. = FALSE)
+    }
     if (verbose) {
         message(sprintf(
-            "WOVEN MCCA-dual | V=%d, n=%d, n_a=%d, K=%d, gamma_y=%.2f\n",
+            "WOVEN MCCA-dual | V=%d, n=%d, n_a=%d, K=%d, gamma_y=%.2f",
             V, n, n_a, K, gamma_y
         ))
     }
 
-    # ── Anchor data (fully observed by definition) ───────────────────────────
     Xa_raw <- lapply(X_list, function(X) X[anchor_idx, , drop = FALSE])
-    col_ok <- lapply(Xa_raw, function(X) which(!apply(X, 2, function(v) all(is.na(v)))))
+    col_ok <- lapply(Xa_raw, function(X) which(!.all_na_cols(X)))
     Xa_list <- lapply(Xa_raw, na_impute_median)
-
-    # ── Anchor Laplacian submatrices (n_a x n_a) ────────────────────────────
-    if (verbose) message("  Extracting anchor Laplacians...\n")
-    L_a_list <- if (!is.null(La_list_precomp)) {
-        lapply(La_list_precomp, as.matrix)
-    } else {
-        lapply(X_list, function(X) {
-            as.matrix(build_laplacian(X, k = k_nn)[anchor_idx, anchor_idx])
-        })
-    }
-
-    # ── M_v matrices and their square roots (n_a x n_a) ─────────────────────
-    if (verbose) message("  Computing M square roots (n_a x n_a)...\n")
-    M_list <- lapply(seq_len(V), function(v) {
-        M <- diag(n_a) + lambdas[v] * L_a_list[[v]] / n_a
-        M + diag(1e-8 * max(diag(M)), n_a)
-    })
-    sq_list <- lapply(M_list, mat_sqrt) # list of list(sqrt, inv_sqrt, ...)
-    M_chol <- lapply(M_list, chol) # for m_orth below
-
-    # ── Label kernel (n_a x n_a) ────────────────────────────────────────────
     Y_a <- Y[anchor_idx]
-    Y_onehot <- model.matrix(~ 0 + factor(Y_a))
-    Y_tilde <- scale(Y_onehot, center = TRUE, scale = FALSE)
-    KY <- tcrossprod(Y_tilde) / n_a
-    IKY <- diag(n_a) + gamma_y * KY
 
-    # ── Build (V*n_a) x (V*n_a) block dual matrix ───────────────────────────
-    # P_{vu} = M_v^{-1/2} IKY M_u^{-1/2}  (v != u),  0  (v == u)
-    if (verbose) {
-        message(sprintf(
-            "  Building %dx%d block matrix (V*n_a)...\n", V * n_a, V * n_a
-        ))
-    }
+    L_a_list <- .anchor_laplacians(X_list, anchor_idx, k_nn, La_list_precomp)
+    roots <- .metric_roots(L_a_list, lambdas, n_a)
+    IKY <- .label_kernel(Y_a, gamma_y)
+    P <- .block_dual_matrix(roots$inv_sqrt, IKY)
+    eig <- .top_eigen(P, K)
+    K_use <- length(eig$values)
 
-    # Pre-compute M_v^{-1/2} IKY once per row-view, reuse across columns
-    MiIKY <- lapply(seq_len(V), function(v) {
-        sq_list[[v]]$inv_sqrt %*% IKY
-    }) # M_v^{-1/2} IKY, n_a x n_a
-
-    P_full <- matrix(0.0, nrow = V * n_a, ncol = V * n_a)
-    for (v in seq_len(V)) {
-        row_idx <- ((v - 1L) * n_a + 1L):(v * n_a)
-        for (u in seq_len(V)) {
-            if (u == v) next
-            col_idx <- ((u - 1L) * n_a + 1L):(u * n_a)
-            P_full[row_idx, col_idx] <- MiIKY[[v]] %*% sq_list[[u]]$inv_sqrt
-        }
-    }
-
-    # ── Top-K eigendecomposition of symmetric P_full ────────────────────────
-    # Always use full eigen() -- P_full is (V*n_a)x(V*n_a) <= ~1200x1200 in
-    # benchmarks, so full decomp is fast and avoids ARPACK convergence issues
-    # with the anti-diagonal block structure. Keep only POSITIVE eigenvalues:
-    # negative eigenvectors correspond to anti-correlated view directions and
-    # would corrupt the SUMCOR solution.
-    if (verbose) message("  Eigendecomposition...\n")
-    ev <- eigen(P_full, symmetric = TRUE) # full, sorted descending
-    pos_idx <- which(ev$values > 1e-10) # strictly positive only
-    if (length(pos_idx) == 0L) stop("No positive eigenvalues in P_full.")
-    K_use <- min(K, length(pos_idx))
-    if (K_use < K) {
-        warning(sprintf(
-            "Only %d positive eigenvalues; K reduced %d -> %d.", length(pos_idx), K, K_use
-        ))
-    }
-    K <- K_use
-    keep <- pos_idx[seq_len(K_use)] # indices of top-K positive evals
-    evals <- ev$values[keep]
-    Phi <- ev$vectors[, keep, drop = FALSE] # (V*n_a) x K
-
-    # ── Extract per-view blocks, compute Za and W ────────────────────────────
-    if (verbose) message("  Extracting Za and recovering W...\n")
     Za_list <- vector("list", V)
     W_list <- vector("list", V)
-
     for (v in seq_len(V)) {
-        row_idx <- ((v - 1L) * n_a + 1L):(v * n_a)
-        phi_v <- Phi[row_idx, , drop = FALSE] # n_a x K
-
-        # Za_v = M_v^{-1/2} phi_v, then M-orthonormalize (Za^T M Za = I)
-        Za_v_raw <- sq_list[[v]]$inv_sqrt %*% phi_v
-        ZMZ <- crossprod(M_chol[[v]] %*% Za_v_raw)
-        ZMZ <- (ZMZ + t(ZMZ)) / 2
-        R_za <- tryCatch(chol(ZMZ), error = function(e) NULL)
-        Za_list[[v]] <- if (!is.null(R_za)) {
-            t(backsolve(R_za, t(Za_v_raw)))
-        } else {
-            # fallback: eigendecomposition
-            ev2 <- eigen(ZMZ, symmetric = TRUE)
-            d_inv <- 1 / sqrt(pmax(ev2$values[seq_len(K_use)], 1e-14))
-            Za_v_raw %*% ev2$vectors[, seq_len(K_use), drop = FALSE] %*% diag(d_inv, K_use)
-        }
-
-        # ── Supervised univariate pre-screening (v7) ────────────────────────
-        # Selects which columns of Xa_list[[v]] enter the Gram matrix BELOW,
-        # before W is recovered -- a genuine re-fit of the min-norm
-        # interpolation on a reduced feature set (Ka_v = X_screened X_screened^T
-        # is a different matrix, not a truncation of the full-feature answer).
-        # Za_list above is unaffected (never depended on features). Scored by
-        # ANOVA F-statistic vs Y on anchor data only.
-        p_v <- ncol(Xa_list[[v]])
-        screen_idx <- seq_len(p_v)
-        if (is.finite(screen_top) && screen_top < p_v) {
-            Xv <- Xa_list[[v]]
-            y_f <- as.factor(Y_a)
-            grand_mean <- colMeans(Xv)
-            ss_between <- numeric(p_v)
-            ss_within  <- numeric(p_v)
-            for (lev in levels(y_f)) {
-                idx <- which(y_f == lev)
-                n_c <- length(idx)
-                if (n_c < 2L) next
-                Xc <- Xv[idx, , drop = FALSE]
-                mean_c <- colMeans(Xc)
-                ss_between <- ss_between + n_c * (mean_c - grand_mean)^2
-                ss_within  <- ss_within + colSums(sweep(Xc, 2, mean_c, "-")^2)
-            }
-            df_b <- nlevels(y_f) - 1L
-            df_w <- n_a - nlevels(y_f)
-            f_score <- (ss_between / max(df_b, 1L)) / (ss_within / max(df_w, 1L) + 1e-12)
-            f_score[!is.finite(f_score)] <- 0
-            screen_idx <- order(f_score, decreasing = TRUE)[seq_len(screen_top)]
-        }
-
-        # W_v = X_a_v^T K_v^{-1} Za_v  (min-norm solution, p_v x K)
-        # Gram matrix built from screened columns only; unscreened rows of
-        # W_v stay exactly zero (same p_v x K shape either way).
-        Xa_screened <- Xa_list[[v]][, screen_idx, drop = FALSE]
-        Ka_v <- tcrossprod(Xa_screened)
-        Ka_reg <- Ka_v + diag(ridge_w * max(diag(Ka_v)), n_a)
-        W_screened <- t(Xa_screened) %*% tryCatch(
-            solve(Ka_reg, Za_list[[v]]),
-            error = function(e) {
-                sv <- svd(Ka_reg)
-                sv$v %*% diag(1 / pmax(sv$d, 1e-10 * max(sv$d)), length(sv$d)) %*%
-                    t(sv$u) %*% Za_list[[v]]
-            }
+        rows <- ((v - 1L) * n_a + 1L):(v * n_a)
+        Za_list[[v]] <- .anchor_scores(
+            eig$vectors[rows, , drop = FALSE],
+            roots$inv_sqrt[[v]], roots$chol[[v]]
         )
-        Wv_full <- matrix(0, p_v, K_use)
-        Wv_full[screen_idx, ] <- W_screened
-        W_list[[v]] <- Wv_full
+        W_list[[v]] <- .recover_W(
+            Xa_list[[v]], Za_list[[v]], Y_a, ridge_w, screen_top
+        )
     }
 
     if (verbose) {
         message(sprintf(
-            "  Done. Top eigenvalues: %s\n",
-            paste(round(evals[seq_len(min(5L, K_use))], 4), collapse = ", ")
+            "  Done. Top eigenvalues: %s",
+            paste(round(eig$values[seq_len(min(5L, K_use))], 4),
+                collapse = ", "
+            )
         ))
     }
 
@@ -258,13 +155,152 @@ woven_mcca_dual <- function(X_list, anchor_idx, Y,
         Za_list = Za_list,
         Xa_list = Xa_list,
         col_ok_list = col_ok,
-        singular_values = evals,
-        M_list = M_list,
+        singular_values = eig$values,
+        M_list = roots$M,
         L_a_list = L_a_list,
         anchor_idx = anchor_idx,
-        K = K, V = V,
+        K = K_use, V = V,
         lambdas = lambdas, gamma_y = gamma_y, k_nn = k_nn,
         n = n, p_v = vapply(X_list, ncol, integer(1L)),
         dual = TRUE
     )
+}
+
+# Step 1: n_a x n_a anchor Laplacians, either extracted from precomputed
+# full-cohort Laplacians or built from each modality's observed rows.
+.anchor_laplacians <- function(X_list, anchor_idx, k_nn, La_list_precomp) {
+    if (!is.null(La_list_precomp)) {
+        return(lapply(La_list_precomp, as.matrix))
+    }
+    lapply(X_list, function(X) {
+        as.matrix(build_laplacian(X, k = k_nn)[anchor_idx, anchor_idx])
+    })
+}
+
+# Step 2: per-modality metric M_v = I + lambda_v L_a / n_a (with a tiny
+# diagonal nudge for numerical stability), its square roots and Cholesky
+# factor.
+.metric_roots <- function(L_a_list, lambdas, n_a) {
+    M <- lapply(seq_along(L_a_list), function(v) {
+        Mv <- diag(n_a) + lambdas[v] * L_a_list[[v]] / n_a
+        Mv + diag(1e-8 * max(diag(Mv)), n_a)
+    })
+    sq <- lapply(M, mat_sqrt)
+    list(
+        M = M,
+        sqrt = lapply(sq, `[[`, "sqrt"),
+        inv_sqrt = lapply(sq, `[[`, "inv_sqrt"),
+        chol = lapply(M, chol)
+    )
+}
+
+# Step 3: label-augmented kernel IKY = I + gamma_y * Ytilde Ytilde^T / n_a,
+# where Ytilde is the column-centered one-hot label matrix.
+.label_kernel <- function(Y_a, gamma_y) {
+    n_a <- length(Y_a)
+    Y_onehot <- stats::model.matrix(~ 0 + factor(Y_a))
+    Y_tilde <- scale(Y_onehot, center = TRUE, scale = FALSE)
+    diag(n_a) + gamma_y * tcrossprod(Y_tilde) / n_a
+}
+
+# Step 4: symmetric block dual matrix with off-diagonal blocks
+# M_v^{-1/2} IKY M_u^{-1/2} and zero diagonal blocks.
+.block_dual_matrix <- function(inv_sqrt_list, IKY) {
+    V <- length(inv_sqrt_list)
+    n_a <- nrow(IKY)
+    left <- lapply(inv_sqrt_list, function(Mi) Mi %*% IKY)
+    P <- matrix(0.0, nrow = V * n_a, ncol = V * n_a)
+    for (v in seq_len(V)) {
+        rows <- ((v - 1L) * n_a + 1L):(v * n_a)
+        for (u in seq_len(V)) {
+            if (u == v) next
+            cols <- ((u - 1L) * n_a + 1L):(u * n_a)
+            P[rows, cols] <- left[[v]] %*% inv_sqrt_list[[u]]
+        }
+    }
+    P
+}
+
+# Step 5: top-K strictly positive eigenpairs of P. Negative eigenvalues
+# correspond to anti-correlated directions and are never kept. A full eigen()
+# is used: P is small (V n_a), and iterative solvers can struggle with its
+# block structure.
+.top_eigen <- function(P, K) {
+    ev <- eigen(P, symmetric = TRUE)
+    pos <- which(ev$values > 1e-10)
+    if (length(pos) == 0L) stop("No positive eigenvalues in the dual matrix.")
+    K_use <- min(K, length(pos))
+    if (K_use < K) {
+        warning(sprintf(
+            "Only %d positive eigenvalues; K reduced %d -> %d.",
+            length(pos), K, K_use
+        ), call. = FALSE)
+    }
+    keep <- pos[seq_len(K_use)]
+    list(values = ev$values[keep], vectors = ev$vectors[, keep, drop = FALSE])
+}
+
+# Step 6: anchor scores Z_v = M_v^{-1/2} phi_v, M-orthonormalized so that
+# Z_v^T M_v Z_v = I.
+.anchor_scores <- function(phi_v, inv_sqrt_v, chol_v) {
+    K <- ncol(phi_v)
+    Z_raw <- inv_sqrt_v %*% phi_v
+    ZMZ <- crossprod(chol_v %*% Z_raw)
+    ZMZ <- (ZMZ + t(ZMZ)) / 2
+    R <- tryCatch(chol(ZMZ), error = function(e) NULL)
+    if (!is.null(R)) {
+        return(t(backsolve(R, t(Z_raw))))
+    }
+    ev <- eigen(ZMZ, symmetric = TRUE)
+    d_inv <- 1 / sqrt(pmax(ev$values[seq_len(K)], 1e-14))
+    Z_raw %*% ev$vectors[, seq_len(K), drop = FALSE] %*% diag(d_inv, K)
+}
+
+# Step 7 (optional): indices of the screen_top features with the largest
+# one-way ANOVA F-statistic against Y_a, or all features if screen_top is
+# Inf or >= p_v.
+.anova_screen <- function(Xa, Y_a, screen_top) {
+    p_v <- ncol(Xa)
+    if (!is.finite(screen_top) || screen_top >= p_v) {
+        return(seq_len(p_v))
+    }
+    y_f <- as.factor(Y_a)
+    n_a <- nrow(Xa)
+    grand_mean <- colMeans(Xa)
+    ss_between <- numeric(p_v)
+    ss_within <- numeric(p_v)
+    for (lev in levels(y_f)) {
+        idx <- which(y_f == lev)
+        if (length(idx) < 2L) next
+        Xc <- Xa[idx, , drop = FALSE]
+        mean_c <- colMeans(Xc)
+        ss_between <- ss_between + length(idx) * (mean_c - grand_mean)^2
+        ss_within <- ss_within + colSums(sweep(Xc, 2, mean_c, "-")^2)
+    }
+    df_b <- nlevels(y_f) - 1L
+    df_w <- n_a - nlevels(y_f)
+    f <- (ss_between / max(df_b, 1L)) / (ss_within / max(df_w, 1L) + 1e-12)
+    f[!is.finite(f)] <- 0
+    order(f, decreasing = TRUE)[seq_len(screen_top)]
+}
+
+# Step 8: min-norm projection matrix W_v = X_s^T (X_s X_s^T + ridge)^{-1} Z_v
+# on the screened columns X_s; screened-out features get zero rows, so W_v is
+# always p_v x K.
+.recover_W <- function(Xa, Za, Y_a, ridge_w, screen_top) {
+    keep <- .anova_screen(Xa, Y_a, screen_top)
+    Xs <- Xa[, keep, drop = FALSE]
+    Ka <- tcrossprod(Xs)
+    Ka_reg <- Ka + diag(ridge_w * max(diag(Ka)), nrow(Ka))
+    W_s <- t(Xs) %*% tryCatch(
+        solve(Ka_reg, Za),
+        error = function(e) {
+            sv <- svd(Ka_reg)
+            sv$v %*% diag(1 / pmax(sv$d, 1e-10 * max(sv$d)), length(sv$d)) %*%
+                t(sv$u) %*% Za
+        }
+    )
+    W <- matrix(0, ncol(Xa), ncol(Za))
+    W[keep, ] <- W_s
+    W
 }

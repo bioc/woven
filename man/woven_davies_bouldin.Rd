@@ -15,6 +15,12 @@ woven_davies_bouldin(Z, labels)
 scalar >= 0, lower is better
 }
 \description{
+Works on any n x K latent score matrix, so the same metric can be
+computed for WOVEN and for embeddings from other methods (for example
+DIABLO variates) when comparing them. [woven_metrics()] computes it
+directly from a fit.
+}
+\details{
 DB = (1/K) sum_i max_\{j != i\} (s_i + s_j) / d(c_i, c_j)
 where s_i = mean intra-cluster distance, d(c_i, c_j) = centroid distance.
 }

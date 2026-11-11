@@ -27,7 +27,7 @@ a ggplot object, printed automatically when called at the top
   level (standard R plot-method behavior).
 }
 \description{
-Plots the first two latent dimensions from \code{Z(fit)}, colored by group
+Plots two latent dimensions from \code{latent_scores(fit)}, colored by group
 label. Anchor subjects (complete cases used to learn W) are shown as filled
 circles; block-missing subjects projected via available views are shown as
 open triangles. Returns a ggplot object that can be further customized with

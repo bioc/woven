@@ -2,9 +2,9 @@
 ^\.\.Rcheck$
 ^.*\.Rcheck$
 ^.*\.BiocCheck$
-^data-raw$
 ^scripts$
 ^slurm$
 ^figures$
 ^results$
 ^paper$
+^.*\.tar\.gz$

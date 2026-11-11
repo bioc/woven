@@ -33,8 +33,8 @@ test_that("woven_precompute() Laplacians are reused identically by woven()", {
         Y = d$groups, anchor_idx = d$anchor_idx,
         K = d$K, verbose = FALSE
     )
-    expect_equal(Z(fit_precomp), Z(fit_direct), tolerance = 1e-8)
-    expect_equal(WList(fit_precomp)[[1]], WList(fit_direct)[[1]], tolerance = 1e-8)
+    expect_equal(latent_scores(fit_precomp), latent_scores(fit_direct), tolerance = 1e-8)
+    expect_equal(projection_matrices(fit_precomp)[[1]], projection_matrices(fit_direct)[[1]], tolerance = 1e-8)
 })
 
 test_that("a precomp with the wrong number of blocks errors clearly", {
@@ -58,9 +58,9 @@ test_that("woven_precompute() reused across two different anchor sets/fits", {
     fit_full <- woven(X_list, Y = d$groups, anchor_idx = d$anchor_idx, K = d$K, precomp = precomp, verbose = FALSE)
     fit_half <- woven(X_list, Y = d$groups, anchor_idx = half, K = d$K, precomp = precomp, verbose = FALSE)
 
-    expect_equal(nrow(Z(fit_full)), d$n)
-    expect_equal(nrow(Z(fit_half)), d$n)
-    expect_false(isTRUE(all.equal(Z(fit_full), Z(fit_half))))
+    expect_equal(nrow(latent_scores(fit_full)), d$n)
+    expect_equal(nrow(latent_scores(fit_half)), d$n)
+    expect_false(isTRUE(all.equal(latent_scores(fit_full), latent_scores(fit_half))))
 })
 
 test_that("summary() with no labels prints without error and returns NULL invisibly", {

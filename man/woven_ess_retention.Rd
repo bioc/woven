@@ -2,7 +2,7 @@
 % Please edit documentation in R/metrics.R
 \name{woven_ess_retention}
 \alias{woven_ess_retention}
-\title{Effective sample size retention}
+\title{Effective sample size (ESS) retention}
 \usage{
 woven_ess_retention(n_used, n_total)
 }
@@ -12,10 +12,13 @@ woven_ess_retention(n_used, n_total)
 \item{n_total}{integer, total subjects in dataset}
 }
 \value{
-scalar in [0, 1], higher is better (DIABLO structurally caps at overlap fraction)
+scalar in [0, 1], higher is better
 }
 \description{
-Effective sample size retention
+The fraction of the cohort that a method can score: \code{n_used /
+n_total}. For WOVEN, every subject with at least one observed modality is
+scored. A complete-case method such as DIABLO scores only subjects
+observed in every modality, so its retention equals the anchor fraction.
 }
 \examples{
 woven_ess_retention(n_used = 80, n_total = 100)

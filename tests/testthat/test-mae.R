@@ -65,3 +65,73 @@ test_that(".mae_to_xlist() fills all-NA rows for subjects absent from an experim
     expect_false(any(is.na(xl$A["s1", ])))
     expect_false(any(is.na(xl$B["s4", ])))
 })
+
+test_that(".mae_to_xlist() stops on replicate samples and names them", {
+    skip_if_not_installed("MultiAssayExperiment")
+    suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
+    A <- matrix(c(10, 11, 20, 21, 30, 31),
+        nrow = 2,
+        dimnames = list(c("f1", "f2"), c("s1", "s2", "s3"))
+    )
+    B <- matrix(1:6, nrow = 2, dimnames = list(c("g1", "g2"), c("t1", "t2", "t3")))
+    smap <- DataFrame(
+        assay = factor(c("A", "A", "A", "B", "B", "B")),
+        primary = c("P1", "P1", "P2", "P1", "P2", "P3"),
+        colname = c("s1", "s2", "s3", "t1", "t2", "t3")
+    )
+    cd <- DataFrame(row.names = c("P1", "P2", "P3"), group = c(1, 2, 1))
+    mae <- MultiAssayExperiment(ExperimentList(list(A = A, B = B)),
+        colData = cd, sampleMap = smap
+    )
+    expect_error(woven:::.mae_to_xlist(mae), "'A' has more than one sample for subject\\(s\\) P1")
+    merged <- mergeReplicates(mae)
+    xl <- woven:::.mae_to_xlist(merged)
+    expect_equal(unname(xl$A["P1", ]), c(15, 16))
+    expect_true(all(is.na(xl$A["P3", ])))
+})
+
+test_that("woven() row names follow colData for a MultiAssayExperiment", {
+    skip_if_not_installed("MultiAssayExperiment")
+    suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
+    data(woven_example, package = "woven")
+    ids <- sprintf("S%03d", 1:90)
+    exps <- lapply(woven_example$X_missing, function(X) {
+        keep <- rowSums(is.na(X)) < ncol(X)
+        t(X[keep, , drop = FALSE])
+    })
+    mae <- MultiAssayExperiment(ExperimentList(exps),
+        colData = DataFrame(row.names = ids, dx = woven_example$Y)
+    )
+    fit <- woven(mae, Y = "dx", K = 3L, verbose = FALSE)
+    expect_identical(rownames(latent_scores(fit)), rownames(colData(mae)))
+    fit_list <- woven(woven_example$X_missing, Y = woven_example$Y, K = 3L, verbose = FALSE)
+    expect_equal(unname(latent_scores(fit)), unname(latent_scores(fit_list)),
+        tolerance = 1e-10
+    )
+})
+
+test_that("woven_scores()/woven_predict() accept a MultiAssayExperiment", {
+    skip_if_not_installed("MultiAssayExperiment")
+    suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
+    data(woven_example, package = "woven")
+    ids <- sprintf("S%03d", 1:90)
+    exps <- lapply(woven_example$X_missing, function(X) {
+        keep <- rowSums(is.na(X)) < ncol(X)
+        t(X[keep, , drop = FALSE])
+    })
+    mae <- MultiAssayExperiment(ExperimentList(exps),
+        colData = DataFrame(row.names = ids, dx = woven_example$Y)
+    )
+    fit <- woven(mae[, 1:60], Y = "dx", K = 3L, verbose = FALSE)
+    # experiments given in a different order and features shuffled
+    test <- mae[, 61:90, rev(names(mae))]
+    test[["RNA"]] <- test[["RNA"]][rev(rownames(test[["RNA"]])), ]
+    Z_mae <- woven_scores(fit, test)
+    X_test <- lapply(woven_example$X_missing, function(X) X[61:90, ])
+    expect_equal(unname(Z_mae), unname(woven_scores(fit, X_test)), tolerance = 1e-12)
+    expect_identical(rownames(Z_mae), ids[61:90])
+    p <- woven_predict(fit, test)
+    expect_identical(rownames(p), ids[61:90])
+    only_rna <- suppressWarnings(suppressMessages(mae[, , "RNA"]))
+    expect_error(woven_scores(fit, only_rna), "lacks experiment")
+})

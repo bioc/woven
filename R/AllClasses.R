@@ -23,15 +23,18 @@
 #'   canonical correlations from the dual eigendecomposition.
 #' @slot anchor_idx integer vector, indices (into the original n subjects)
 #'   of the fully-observed anchor subjects.
-#' @slot Y_anchor labels of the anchor subjects, in \code{anchor_idx} order.
-#' @slot Y_levels sorted unique class labels seen during fitting.
-#' @slot Y_labels optional original label names (e.g. \code{"CN"}), or
-#'   \code{NULL} if \code{Y} was already numeric/integer.
+#' @slot Y_anchor integer class codes of the anchor subjects, in
+#'   \code{anchor_idx} order.
+#' @slot Y_levels sorted unique integer class codes seen during fitting.
+#' @slot Y_labels character vector of class names,
+#'   \code{levels(as.factor(Y))}, in code order (code 1 is
+#'   \code{Y_labels[1]}). For numeric \code{Y} these are the numbers as
+#'   strings, e.g. \code{c("1", "2", "3")}.
 #' @slot K integer, latent dimension.
 #' @slot V integer, number of modalities.
 #' @slot n integer, total number of subjects.
-#' @slot mod_names optional character vector of modality names, or
-#'   \code{NULL} if \code{X_list} was unnamed.
+#' @slot mod_names character vector of modality names; unnamed inputs get
+#'   \code{"Modality 1"}, \code{"Modality 2"}, ...
 #' @slot lambdas numeric vector of length V, per-modality Laplacian
 #'   regularization strength used at fit time.
 #' @slot gamma_y numeric, supervision strength used at fit time.
@@ -46,10 +49,10 @@
 #'   scales used for standardization, reapplied in \code{\link{woven_scores}}.
 #' @slot fit_mcca list, the raw output of \code{\link{woven_mcca_dual}} for
 #'   advanced/diagnostic use.
-#'
-#' @seealso [woven()]
+#' @seealso [woven()] to fit a model; [woven-accessors] to read one.
 #' @exportClass woven
-setClass("woven",
+setClass(
+    "woven",
     representation(
         Z = "matrix",
         W_list = "list",
@@ -115,7 +118,8 @@ setValidity("woven", function(object) {
 #' @slot singular_values numeric vector.
 #' @slot metrics optional named numeric vector from \code{\link{woven_metrics}}.
 #' @keywords internal
-setClass("wovenSummary",
+setClass(
+    "wovenSummary",
     representation(
         V = "integer",
         K = "integer",

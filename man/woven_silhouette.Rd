@@ -15,7 +15,10 @@ woven_silhouette(Z, labels)
 scalar in [-1, 1], higher is better
 }
 \description{
-Average silhouette width
+Works on any n x K latent score matrix, so the same metric can be
+computed for WOVEN and for embeddings from other methods (for example
+DIABLO variates) when comparing them. [woven_metrics()] computes it
+directly from a fit.
 }
 \examples{
 set.seed(1)

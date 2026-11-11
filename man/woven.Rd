@@ -37,9 +37,15 @@ objective.}
 
 \item{anchor_idx}{integer vector  -- indices of fully-observed subjects
 (observed in all V modalities). Must have length >= K. If NULL (default),
-anchors are detected automatically as subjects with no block-missing modalities.}
+anchors are detected automatically as subjects with no block-missing
+modalities. A supplied \code{anchor_idx} is checked: indices must be
+distinct, within \code{1..n}, and observed in every modality; offending
+subjects are named in the error.}
 
-\item{K}{integer  -- number of latent dimensions (default 5)}
+\item{K}{integer  -- number of latent dimensions (default 5). Must be
+smaller than n and no larger than the number of anchors. Each
+modality's projection matrix has rank at most \code{min(n_a, p_v)}, so
+a warning is given if K exceeds a modality's number of features.}
 
 \item{lambdas}{numeric scalar or length-V vector  -- Laplacian regularization
 strength per modality (default 0.1 for all)}
@@ -67,14 +73,17 @@ p_v is large relative to n_a. Select jointly with \code{ridge_w} via
 cross-validation, not independently (the two interact).}
 
 \item{scale}{logical  -- standardize each modality's features to zero mean and
-unit variance before fitting (default TRUE), matching DIABLO (scale=TRUE) and
-IntegrAO. Apply biological transforms (CLR/log/VST) upstream. The center and
-scale are stored and reapplied to new subjects in [woven_scores()].
-Ignored when \code{precomp} is supplied.}
+unit variance before fitting (default TRUE), so no modality dominates by
+measurement scale. Apply biological transforms (CLR/log/VST) upstream.
+The center and scale are stored and reapplied to new subjects in
+[woven_scores()]. When \code{precomp} is supplied it must have been
+built with the same \code{scale} value; a mismatch is an error.}
 
-\item{precomp}{optional output of [woven_precompute()] -- pre-built Laplacians.
-Pass this when calling \code{woven()} multiple times on the same data (e.g.
-hyperparameter search, cross-validation) to avoid rebuilding the graph each time.}
+\item{precomp}{optional output of [woven_precompute()] -- pre-built
+Laplacians for the same \code{X_list}. Pass this when calling
+\code{woven()} multiple times on the same data (e.g. hyperparameter
+search, cross-validation) to avoid rebuilding the graph each time.
+When supplied, \code{k_nn} is taken from \code{precomp}.}
 
 \item{verbose}{logical  -- print progress (default TRUE)}
 }
@@ -87,7 +96,9 @@ an object of S4 class \code{\linkS4class{woven}}. Key slots:
     \item{Z_anchors}{list of V anchor latent score matrices, each n_a x K}
     \item{singular_values}{K supervised canonical correlations}
     \item{anchor_idx}{indices of anchor (fully-observed) subjects}
-    \item{Y_levels}{class label levels used during fitting}
+    \item{Y_levels}{integer codes of the classes used during fitting}
+    \item{Y_labels}{class names, \code{levels(as.factor(Y))}; for
+      numeric \code{Y} these are the numbers as strings}
     \item{K, V, n}{dimensions}
     \item{lambdas, gamma_y}{hyperparameters}
   }
@@ -121,7 +132,7 @@ X1[miss[, 1], ] <- NA
 X2[miss[, 2], ] <- NA
 # anchor_idx auto-detected from NA pattern -- no need to specify
 fit <- woven(list(X1, X2), Y = Y, K = K)
-dim(Z(fit)) # 60 x 2 -- all subjects scored
+dim(latent_scores(fit)) # 60 x 2 -- all subjects scored
 
 # Equivalently, from a MultiAssayExperiment: each experiment is one
 # modality, and subjects missing an experiment need no special handling.
@@ -139,10 +150,11 @@ if (requireNamespace("MultiAssayExperiment", quietly = TRUE)) {
     cd <- DataFrame(row.names = ids, group = Y)
     mae <- MultiAssayExperiment(exps, colData = cd)
     fit_mae <- woven(mae, Y = "group", K = K)
-    dim(Z(fit_mae)) # same 60 x 2 -- all subjects scored
+    dim(latent_scores(fit_mae)) # same 60 x 2 -- all subjects scored
 }
 
 }
 \seealso{
-[woven_scores()], [woven_predict()], [woven_all_metrics()]
+[woven_scores()], [woven_predict()], [woven_metrics()],
+  [woven_precompute()], [woven-accessors]
 }

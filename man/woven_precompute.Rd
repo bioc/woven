@@ -16,8 +16,12 @@ are automatically excluded from the k-NN graph.}
 Laplacians (default TRUE); use the same value passed to [woven()].}
 }
 \value{
-list of V sparse Laplacian matrices, one per modality. Pass directly
-  to the \code{precomp} argument of [woven()].
+list of V sparse Laplacian matrices (n x n), one per modality.
+  Pass directly to the \code{precomp} argument of [woven()]. The list
+  records the \code{scale}, \code{k_nn} and \code{n} it was built with
+  (as attributes \code{"woven_scale"}, \code{"woven_k_nn"},
+  \code{"woven_n"}), and [woven()] stops if its own \code{scale} or the
+  number of subjects does not match.
 }
 \description{
 Builds k-NN RBF Laplacians for each modality from the observed data.

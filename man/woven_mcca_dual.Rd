@@ -2,7 +2,7 @@
 % Please edit documentation in R/solver_mcca_dual.R
 \name{woven_mcca_dual}
 \alias{woven_mcca_dual}
-\title{Fit supervised WOVEN for V >= 2 views via dual SUMCOR MCCA (closed-form)}
+\title{Closed-form dual SUMCOR MCCA solver (low-level)}
 \usage{
 woven_mcca_dual(
   X_list,
@@ -19,59 +19,75 @@ woven_mcca_dual(
 )
 }
 \arguments{
-\item{X_list}{list of V matrices, each n x p_v (NA rows = block-missing)}
+\item{X_list}{list of V matrices, each n x p_v. Rows that are entirely
+\code{NA} mark subjects missing that modality (block-missing).}
 
-\item{anchor_idx}{integer vector of fully-observed subject indices}
+\item{anchor_idx}{integer vector of subjects observed in every modality.
+Validated: indices must be distinct, within 1..n, and not block-missing
+in any modality.}
 
-\item{Y}{vector of length n, class labels (required)}
+\item{Y}{vector of length n of class labels. Only \code{Y[anchor_idx]} is
+used.}
 
-\item{K}{integer, number of latent dimensions}
+\item{K}{integer, number of latent dimensions. Each projection matrix has
+rank at most \code{min(n_a, p_v)}; a warning is given when \code{K}
+exceeds a modality's feature count.}
 
-\item{lambdas}{numeric scalar or length-V vector, Laplacian regularization}
+\item{lambdas}{numeric scalar or length-V vector, Laplacian regularization.}
 
-\item{gamma_y}{numeric >= 0, label supervision strength}
+\item{gamma_y}{numeric >= 0, label supervision strength.}
 
-\item{k_nn}{integer, k-NN for Laplacian (ignored if La_list_precomp supplied)}
+\item{k_nn}{integer, k-NN graph size (ignored if \code{La_list_precomp}
+is supplied).}
 
-\item{La_list_precomp}{optional list of pre-extracted n_a x n_a anchor Laplacians}
+\item{La_list_precomp}{optional list of V pre-extracted n_a x n_a anchor
+Laplacians.}
 
-\item{ridge_w}{numeric >= 0, relative ridge strength for the W recovery step
-(Ka_reg = Ka_v + ridge_w * max(diag(Ka_v)) * I). Default 1e-8 is a pure
-numerical-stability nudge (original behavior). Larger values shrink
-W_v toward zero, trading anchor fit for reduced variance when p_v >> n_a
-(v7 regularization; CV-selected like lambdas and gamma_y).}
+\item{ridge_w}{numeric >= 0, relative ridge strength in W recovery
+(\code{ridge_w * max(diag(Ka_v))} is added to the diagonal of the anchor
+Gram matrix \code{Ka_v}). The default 1e-8 only stabilizes the solve.}
 
-\item{screen_top}{integer or Inf, per-modality feature count for
-univariate (ANOVA F-score vs Y) supervised pre-screening BEFORE the W
-recovery step. Default Inf disables this (all features used, original
-behavior). The eigendecomposition (Za_list) never depends on features --
-only the Laplacians and label kernel -- so screening only changes the
-W_v = X_a_v^T Ka_v^\{-1\} Za_v recovery: Ka_v = X_a_v X_a_v^T is built
-from the screened columns only, which is a genuine re-fit of the
-min-norm interpolation on a reduced feature set (not a post-hoc
-truncation of an already-complete solution). Screened-out features get
-an exact zero row in the returned W_v (same shape as unscreened, so
-all downstream code -- project_all(), woven_scores() -- is unaffected).}
+\item{screen_top}{integer or \code{Inf}; if finite, W recovery uses only
+the \code{screen_top} features per modality with the largest ANOVA
+F-statistic against \code{Y} on anchor subjects. Screened-out features
+get a zero row in W.}
 
-\item{verbose}{logical}
+\item{verbose}{logical, print progress messages.}
 }
 \value{
-list with W_list, Za_list, Xa_list, singular_values, and metadata.
-  Compatible with project_all() in benchmark_one_rep.R.
+a list with components \code{W_list} (V matrices, p_v x K),
+  \code{Za_list} (V anchor score matrices, n_a x K), \code{Xa_list}
+  (anchor data used), \code{singular_values} (length K),
+  \code{M_list}, \code{L_a_list}, \code{anchor_idx}, \code{K}, \code{V},
+  \code{lambdas}, \code{gamma_y}, \code{k_nn}, \code{n}, \code{p_v}.
 }
 \description{
-Single eigendecomposition of a (V*n_a) x (V*n_a) block matrix. No iterations,
-no random restarts, no local optima. Unified solver for all V.
+The solver that \code{\link{woven}} calls internally. Most users should
+call \code{woven()}, which adds input standardization, automatic anchor
+detection, MultiAssayExperiment input, latent scores for every subject,
+and an S4 result object. \code{woven_mcca_dual()} is exported for
+method developers who want the raw solver output (anchor scores, metric
+matrices, anchor Laplacians) without that wrapping.
+}
+\details{
+The fit is a single eigendecomposition of a (V n_a) x (V n_a) block
+matrix, with no iterations, random restarts or local optima. SUMCOR
+("sum of correlations") is the multi-set CCA criterion that maximizes the
+sum of pairwise correlations between the modalities' latent scores.
 }
 \examples{
 set.seed(1)
 n <- 20
-K <- 2L
 X1 <- matrix(rnorm(n * 5), n, 5)
 X2 <- matrix(rnorm(n * 4), n, 4)
 X3 <- matrix(rnorm(n * 3), n, 3)
 Y <- rep(1:2, each = n / 2)
-anchor_idx <- seq_len(14L)
-fit <- woven_mcca_dual(list(X1, X2, X3), anchor_idx = anchor_idx, Y = Y, K = K)
-length(fit$W_list)
+fit <- woven_mcca_dual(list(X1, X2, X3),
+    anchor_idx = seq_len(14L), Y = Y,
+    K = 2L, verbose = FALSE
+)
+fit$singular_values
+}
+\seealso{
+[woven()]
 }

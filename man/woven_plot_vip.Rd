@@ -15,7 +15,8 @@ woven_plot_vip(
 \arguments{
 \item{fit}{woven object from [woven()]}
 
-\item{modality}{integer: which modality to plot (1..V, default 1)}
+\item{modality}{integer index (1..V) or name of the modality to plot
+(default 1)}
 
 \item{n_top}{integer: number of top features to display (default 20)}
 
@@ -51,5 +52,5 @@ fit <- woven(list(X1, X2), Y = Y, K = K)
 woven_plot_vip(fit, modality = 1L)
 }
 \seealso{
-[woven_plot_loadings()], [woven_plot_variance()], [woven_vip()]
+[woven_plot_loadings()], [woven_plot_variance()]
 }

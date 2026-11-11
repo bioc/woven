@@ -15,22 +15,22 @@
 #' @param sigma numeric, RBF bandwidth. NULL = median heuristic over observed edges.
 #' @param kernel_matrix numeric matrix, n_obs x n_obs precomputed affinity (Gram)
 #'   matrix for the observed rows only. When provided, bypasses RBF k-NN entirely.
-#'   Rows correspond to \code{X[!block_missing_rows, ]} in order.
-#'   Used by the QIC quantum kernel extension (GRAMA-Quantum).
+#'   Rows correspond to \code{X[!block_missing_rows, ]} in order. Lets an
+#'   externally computed kernel replace the default RBF graph.
 #' @return sparse n_full x n_full symmetric combinatorial Laplacian (dgCMatrix).
-#' @keywords internal
+#' @noRd
 build_laplacian <- function(X, k = 10L, sigma = NULL, kernel_matrix = NULL) {
     n_full <- nrow(X)
 
     # Identify block-missing rows (entire row NA) -- excluded, never imputed
-    all_na_row <- rowSums(!is.na(X)) == 0L
+    all_na_row <- .block_missing_rows(X)
     obs_idx <- which(!all_na_row)
     n_obs <- length(obs_idx)
 
     if (n_obs == 0L) stop("No observed rows in X -- cannot build Laplacian.")
 
     if (!is.null(kernel_matrix)) {
-        # --- Precomputed kernel path (GRAMA-Quantum or any external Gram matrix) ---
+        # --- Precomputed kernel path (any external Gram matrix) ---
         kernel_matrix <- as.matrix(kernel_matrix)
         if (!identical(dim(kernel_matrix), c(n_obs, n_obs))) {
             stop(sprintf(

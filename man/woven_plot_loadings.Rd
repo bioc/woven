@@ -24,7 +24,8 @@ woven_plot_loadings(
 If a plain character vector is passed for a single-modality call, it is
 used for that modality. If NULL, uses rownames of W or "Feature_j".}
 
-\item{modality}{integer or NULL: if specified, plot only that modality.
+\item{modality}{NULL, or one or more modality indices or names: plot only
+those modalities.
 If NULL (default), all V modalities are shown in faceted panels.}
 
 \item{main}{character: plot title. If NULL, a default is used.}

@@ -4,29 +4,34 @@
 \alias{woven_predict}
 \title{Predict class probabilities for new subjects}
 \usage{
-woven_predict(fit, X_list_new, method = "centroid", k_pred = 5L)
+woven_predict(fit, X_list_new, method = c("centroid", "knn"), k_pred = 5L)
 }
 \arguments{
 \item{fit}{woven object from [woven()]}
 
-\item{X_list_new}{list of V matrices for new subjects (n_new x p_v each).
-Block-missing subjects should have their modality rows set to NA.}
+\item{X_list_new}{new subjects, in either form accepted by
+[woven_scores()]: a list of V matrices (n_new x p_v) with all-NA rows
+for missing modality blocks, or a \code{MultiAssayExperiment}.}
 
-\item{method}{"centroid" (default)  -- nearest centroid in latent space.
-"knn"  -- k-NN vote using anchor subjects as the reference set.}
+\item{method}{\code{"centroid"} (default): inverse-squared-distance
+weights to the class centroids of the anchor scores.
+\code{"knn"}: k-NN vote among anchor subjects.}
 
 \item{k_pred}{integer  -- number of neighbors for knn method (default 5)}
 }
 \value{
-data.frame with n_new rows:
-  $predicted_class  integer predicted class label
-  $confidence       probability of predicted class (0-1)
-  One column per class level with soft probabilities
+data.frame with n_new rows and columns \code{predicted_class}
+  (class name, as in \code{levels(as.factor(Y))}), \code{confidence}
+  (probability of the predicted class), and one \code{p_<class>} column
+  per class with soft probabilities. Subjects with no observed modality
+  get uniform probabilities.
 }
 \description{
-Projects new subjects into the WOVEN latent space and returns soft class
-assignments using a nearest-centroid classifier in latent space. Works for
-complete subjects (direct projection) and block-missing subjects (Nystrom).
+Projects new subjects into the WOVEN latent space with [woven_scores()]
+and returns soft class assignments from a nearest-centroid (or k-NN)
+classifier built on the anchor subjects' latent scores (computed by the
+same projection). Works the same
+way for complete and block-missing subjects.
 }
 \examples{
 set.seed(1)

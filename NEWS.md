@@ -1,86 +1,166 @@
+# woven 0.99.4
+
+## Changes in behaviour and API
+
+* Accessors renamed to snake_case to match the rest of the API, and `Z()`
+  renamed so it is not a one-letter name: `latent_scores()` (was `Z()`),
+  `projection_matrices()` (was `WList()`), `anchor_indices()` (was
+  `anchorIdx()`), `singular_values()` (was `singularValues()`). They are
+  documented together at `?"woven-accessors"`.
+* A user-supplied `anchor_idx` is now checked in `woven()` and
+  `woven_mcca_dual()`: indices must be distinct integers within `1..n`, and
+  every anchor must be observed in every modality. Offending subjects are
+  named in the error (previously this failed later with "non-conformable
+  arrays").
+* `woven_precompute()` records the `scale`, `k_nn` and number of subjects it
+  used. `woven()` stops if its own `scale` differs from the precomputed
+  graphs, stops if the number of subjects differs, warns if `k_nn` differs
+  (the precomputed graphs' `k_nn` is used and recorded in the fit), and warns
+  if a hand-built `precomp` carries no scale record.
+* `woven()` and `woven_mcca_dual()` warn when `K` exceeds a modality's
+  number of features (each projection matrix has rank at most
+  `min(n_a, p_v)`).
+* `woven_scores()` and `woven_predict()` accept a `MultiAssayExperiment`;
+  experiments are matched to the training modalities by name and features by
+  row name.
+* `woven_predict()` builds its class centroids (or k-NN reference set) from
+  the anchors' latent scores computed by the same projection as the new
+  subjects, so reference and new subjects lie in the same space. Previously
+  it used the anchors' eigenvector scores, which differ in scale from
+  projected scores when a modality has fewer features than anchors.
+  `method` is now matched with `match.arg()`.
+* `woven_nystrom_error()` now standardizes `X_list` with the fit's stored
+  center and scale, refits with all of the fit's hyperparameters (including
+  `k_nn`, `ridge_w`, `screen_top`), aligns the sign of each refitted
+  dimension with the full fit, compares the held-out subject's projected
+  score with its score in `latent_scores(fit)`, and checks that `n_loo` is
+  between 1 and the number of anchors. The unused `sigma_proj` argument was
+  removed.
+* `.mae_to_xlist()` (used by `woven()` for MultiAssayExperiment input) stops
+  with an error naming the subject and experiment when an experiment has
+  replicate samples for one subject, instead of silently keeping the first.
+* `woven_metrics()` no longer takes `...` (extra arguments were computed and
+  then discarded).
+* Laplacians in `woven_precompute()` are built in a serial loop inside one
+  internal helper. BiocParallel and parallel are no longer dependencies: one
+  graph per modality takes about 0.5 s for a 300 x 5,000 modality, so
+  parallel workers saved little.
+
+## Documentation
+
+* The vignette now uses BiocStyle, has a floating table of contents, and its
+  main workflow is a real block-missing dataset in a MultiAssayExperiment
+  (TCGA adrenocortical carcinoma, `miniACC`), including mapping scores back
+  to `colData`, a held-out prediction, a glossary, comparison with DIABLO,
+  MOFA2 and missRows, and a Limitations section.
+* The package help page (`?woven-package`) lists the main entry points.
+* DESCRIPTION defines SUMCOR, block-missing ("ragged") data, ESS retention
+  and the Nystrom extension; biocViews no longer include Sequencing or
+  MultipleComparison.
+* `?woven_nmi`, `?woven_nystrom_error` and `?woven_metrics` explain that
+  results depend on the random number generator and show `set.seed()` in
+  the examples.
+* The `Y_labels` slot is documented as it behaves: class names
+  `levels(as.factor(Y))`, which for numeric `Y` are the numbers as strings.
+* `?woven_example` gives the data source and license; the generating script
+  moved from `data-raw/` to `inst/scripts/make_woven_example.R` and
+  reproduces `data/woven_example.rda` exactly.
+* README corrected: MOFA2 accepts samples with whole views missing.
+
+## Bug fixes and minor improvements
+
+* `woven_all_metrics()` (internal) passed two matrices to
+  `woven_nystrom_error()` positionally, so the second bound to an unused
+  argument and the Nystrom error was computed from one modality only. It now
+  takes `X_list`.
+* `woven_mcca_dual()` is split into named internal steps (anchor
+  Laplacians, metric square roots, label kernel, block dual matrix,
+  eigendecomposition, anchor scores, feature screening, W recovery). Results
+  are bit-for-bit identical to 0.99.3.
+* Shared internal helpers for detecting block-missing rows
+  (`rowSums(is.na(X)) == ncol(X)`), for projecting subjects (used by
+  `woven()` and `woven_scores()`), for checking new data, and for checking
+  that ggplot2 is installed (now called by every plotting function).
+* The plotting functions give informative errors for an out-of-range `dim`
+  or an unknown `modality`.
+* Removed unused internal code (`compute_B()`, `compute_B_kernel()`, the
+  truncated RSpectra path in `mat_sqrt()`); RSpectra is no longer in
+  Suggests. Internal helpers no longer have Rd pages.
+* Every `importFrom` is used; other packages are called with `::`.
+* Removed the stale `data-raw/test_solver.R` and comments that referred to
+  files outside the package.
+* Removed `Author:` and `Maintainer:` from DESCRIPTION (`Authors@R` is the
+  single source).
+* New tests: solver results against hand-computed eigenvalues and scores
+  (V = 2 and V = 3), input validation, precompute/scale checks,
+  reproducibility, `woven_scores()`, `woven_predict()`, the plotting
+  functions, `woven_effect_bias()`, `woven_all_metrics()` and internal
+  helpers.
+
 # woven 0.99.3
 
-* Removed a stale DESCRIPTION claim about sparse projection matrices (PMD);
-  no such code path exists (`woven()` recovers dense projection matrices by
-  design, optionally ridge-regularized and feature-screened via `ridge_w`
-  and `screen_top`). DESCRIPTION now describes that mechanism instead.
-* `.scale_fit()` (internal) rewritten without `<<-` (BiocCheck NOTE).
-* `summary()`'s printed report now goes through a dedicated internal
-  `wovenSummary` S4 class with its own `show` method, so `cat()` output
-  only ever appears inside a `show` method (BiocCheck NOTE). `summary()`
-  still returns the metrics vector invisibly; printed output is unchanged.
-* Escaped literal braces in a `solver_mcca_dual.R` roxygen comment that
-  `R CMD check` was parsing as Rd markup ("Lost braces" NOTE).
-* `.Rbuildignore` now excludes `*.Rcheck`/`*.BiocCheck` directories, so a
-  leftover local check-output directory can no longer ship inside the
-  built source tarball (one had shipped in the 0.99.2 tarball).
-* Added `tests/testthat/test-precompute-plot-summary.R`, covering
-  `woven_precompute()` reuse/equivalence, a malformed-precomp error path,
-  `summary()` with and without labels, `plot()` with/without labels and
-  anchor-highlighting (including its out-of-range-dims error), and
-  `woven_nystrom_error()` as a regression test for the 0.99.2 `Za_list`
-  field-name bug fix. These close out the last open items from the
-  agentic Bioconductor review's testing-gap finding.
-* Verified clean from a rebuilt tarball: `R CMD check` 0 errors/0
-  warnings/0 notes; `BiocCheck` 0 errors/0 warnings/4 notes (down from 6,
-  all cosmetic); 88/88 tests pass.
+## Changes in behaviour and API
+
+* DESCRIPTION no longer claims sparse projection matrices; `woven()` recovers
+  dense projection matrices, optionally ridge-regularized and
+  feature-screened via `ridge_w` and `screen_top`.
+
+## Bug fixes and minor improvements
+
+* `.scale_fit()` (internal) rewritten without `<<-`.
+* `summary()` prints through an internal `wovenSummary` class with its own
+  `show` method; `summary()` still returns the metrics vector invisibly and
+  the printed output is unchanged.
+* Escaped literal braces in a roxygen comment that were parsed as Rd markup.
+* `.Rbuildignore` excludes check-output directories.
+* Added tests for `woven_precompute()` reuse, a malformed `precomp`,
+  `summary()`, `plot()` and `woven_nystrom_error()`.
 
 # woven 0.99.2
 
-* The object returned by `woven()` is now an S4 class (`woven`, defined in
-  `AllClasses.R`) instead of a plain S3 list. `show`, `summary`, and `plot`
-  are now real S4 methods. New accessor generics `Z()`, `WList()`,
-  `anchorIdx()`, and `singularValues()` are the recommended way to pull the
-  most commonly used slots out of a fit; see `?\`woven-class\`` for the
-  complete slot list, or use `@` directly for anything an accessor does not
-  cover.
-* Fixed a real bug in `woven_nystrom_error()`: it referenced a field
-  (`fit$Za_list`) that did not exist on the fit object (the correct name is
-  `Z_anchors`), so the function always silently returned `NaN` rather than
-  ever computing a real projection error. It also passed a too-short `Y`
-  vector to the internal leave-one-out refit; both are fixed, and the
-  function now returns a real, non-degenerate value.
-* `plot()` on a woven fit now returns the ggplot object directly (visibly)
-  instead of forcing a `print()` call internally and returning it invisibly;
-  this is the standard R plot-method convention and avoids printing outside
-  a `show` method.
-* `woven()` now accepts a `MultiAssayExperiment` directly as `X_list`. Each
-  experiment becomes one modality; subjects are aligned to `colData` via
-  `sampleMap`, and a subject absent from a given experiment gets an all-NA
-  row for it automatically, matching the existing block-missing convention.
-  `Y` may be a colData column name (a single string) instead of an explicit
-  vector. See `?woven` for a worked example and `.mae_to_xlist()` for the
-  conversion internals.
-* Laplacian construction in `woven_precompute()` now parallelizes via
-  `BiocParallel` (`MulticoreParam`/`SnowParam`/`SerialParam` chosen by
-  platform) instead of `parallel::mclapply`, which does not fork on Windows.
-* Fixed a stale `?woven` description of solver routing (it described a
-  since-removed V=2-only closed-form / V>=3 ALS split; the package has used
-  a single closed-form dual SUMCOR MCCA solver for all V since 0.99.0).
-* Fixed "Nystrm" typo (-> "Nystrom") in source comments and documentation.
+## Changes in behaviour and API
+
+* The object returned by `woven()` is an S4 class (`woven`) instead of an S3
+  list. `show`, `summary` and `plot` are S4 methods, and accessor generics
+  were added for the most used slots.
+* `woven()` accepts a `MultiAssayExperiment` as `X_list`. Each experiment
+  becomes one modality, subjects are aligned through `sampleMap`, a subject
+  absent from an experiment gets an all-NA row, and `Y` may be the name of a
+  `colData` column.
+* `plot()` on a fit returns the ggplot object visibly instead of printing it
+  and returning it invisibly.
+* `woven_nystrom_error()` referred to a non-existent field and always
+  returned `NaN`; it now computes the error. It also passed a too-short `Y`
+  to the internal refit; fixed.
+* `woven_precompute()` uses BiocParallel instead of `parallel::mclapply`,
+  which does not fork on Windows.
+
+## Bug fixes and minor improvements
+
+* `?woven` no longer describes a removed two-solver design.
+* Fixed the "Nystrm" typo.
 * Vignette introduction rewritten: defines "assay block", explains the
-  Nystrom method and its use as an out-of-sample extension (with a link to
-  further reading), and states WOVEN's comparison to DIABLO concretely
-  instead of via an unqualified "standard methods" claim.
-* (Retroactive note, first available in 0.99.1) `woven()` exposes `ridge_w`
-  and `screen_top`, ridge-regularized / feature-screened recovery of the
-  projection matrices, useful when a modality has many more features than
-  anchor subjects and the true signal is diffuse. Select jointly via
-  cross-validation on held-out classification error.
+  Nystrom method, and compares with DIABLO concretely.
+* (First available in 0.99.1) `woven()` exposes `ridge_w` and `screen_top`
+  for ridge-regularized and feature-screened projection matrices.
 
 # woven 0.99.1
 
-* `woven()` now standardizes each modality to zero mean and unit variance by
-  default (`scale = TRUE`), matching the internal scaling of comparator methods
-  so that no modality dominates by measurement scale. Stored centers and scales
-  are reapplied to new subjects in `woven_scores()` and `woven_predict()`. Set
-  `scale = FALSE` to retain the previous raw-feature behavior.
+* `woven()` standardizes each modality to zero mean and unit variance by
+  default (`scale = TRUE`). Stored centers and scales are reapplied to new
+  subjects in `woven_scores()` and `woven_predict()`. `scale = FALSE` keeps
+  the previous raw-feature behaviour.
 
 # woven 0.99.0
 
 * Initial Bioconductor submission.
-* Unified dual SUMCOR MCCA solver (`woven_mcca_dual`) for all V >= 2 modalities.
-* Nyström out-of-sample extension for block-missing subjects.
-* Graph Laplacian regularization built on observed rows only (no imputation).
+* Closed-form dual SUMCOR MCCA solver (`woven_mcca_dual()`) for any number
+  of modalities V >= 2.
+* Nystrom (linear out-of-sample) projection of block-missing subjects.
+* Graph Laplacian regularization built on observed rows only, without
+  imputation.
 * Label-augmented cross-covariance for supervised integration.
-* Full benchmark against DIABLO, MOFA2, IntegrAO, and Impute+DIABLO across four simulation arms and ADNI real-data validation.
+* The method was benchmarked against DIABLO, MOFA2, IntegrAO and
+  imputation followed by DIABLO, and applied to ADNI data, in the companion
+  manuscript; the benchmark code is distributed with the manuscript, not
+  with this package.

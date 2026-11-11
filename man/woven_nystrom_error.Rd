@@ -4,28 +4,44 @@
 \alias{woven_nystrom_error}
 \title{Leave-anchor-out Nystrom projection error}
 \usage{
-woven_nystrom_error(fit, X_list, n_loo = NULL, sigma_proj = NULL)
+woven_nystrom_error(fit, X_list, n_loo = NULL)
 }
 \arguments{
 \item{fit}{a woven object from [woven()]}
 
-\item{X_list}{list of complete (no block-missing) modality matrices, same
-structure as passed to [woven()]}
+\item{X_list}{the same list of modality matrices passed to [woven()],
+on the original (unscaled) feature scale}
 
-\item{n_loo}{integer, number of anchors to hold out (default min(20, n_a))}
-
-\item{sigma_proj}{unused, kept for compatibility}
+\item{n_loo}{integer, number of anchors to hold out, between 1 and the
+number of anchors (default \code{min(20, n_a)})}
 }
 \value{
-scalar >= 0, lower is better (mean Frobenius error per anchor)
+scalar >= 0, lower is better (mean distance per held-out anchor)
 }
 \description{
-For each held-out anchor subject, refits WOVEN without it, projects via
-direct W scoring, and computes ||Z_proj - Z_direct||.
-Quantifies how well the projection generalizes across anchor subsets.
+A diagnostic for how stable the projection of an unseen subject is. For
+each of \code{n_loo} randomly chosen anchor subjects, WOVEN is refitted
+without that subject (same hyperparameters as \code{fit}), the held-out
+subject is projected with the refitted projection matrices (the linear
+Nystrom out-of-sample extension used for block-missing subjects), and the
+Euclidean distance to its latent score in the full fit
+(\code{latent_scores(fit)}) is recorded. The function
+returns the mean distance. Small values mean that a subject's latent score
+does not depend much on whether it was in the training set.
+}
+\details{
+Because latent dimensions are identified only up to sign, each refitted
+dimension is sign-aligned to the full fit before the distance is taken.
+The anchors to hold out are drawn with \code{sample()}, so the result
+depends on R's random number generator: call \code{set.seed()} first for
+a reproducible value (the package itself never sets the seed).
 }
 \examples{
 data(woven_example)
-fit <- woven(woven_example$X_complete, Y = woven_example$Y, K = 3L)
+fit <- woven(woven_example$X_complete,
+    Y = woven_example$Y, K = 3L,
+    verbose = FALSE
+)
+set.seed(1) # held-out anchors are sampled at random
 woven_nystrom_error(fit, woven_example$X_complete, n_loo = 5L)
 }

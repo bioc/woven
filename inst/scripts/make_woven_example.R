@@ -1,7 +1,11 @@
 #!/usr/bin/env Rscript
-# Generates the woven_example built-in dataset.
-# Run once: Rscript data-raw/make_woven_example.R
-# Output: data/woven_example.rda
+# Generates the woven_example dataset shipped in data/woven_example.rda.
+# All values are simulated (no real subjects); see ?woven_example.
+#
+# Run from the package source root:
+#   Rscript inst/scripts/make_woven_example.R
+# Output: data/woven_example.rda (identical to the shipped file; the script is
+# fully seeded with set.seed(42) and set.seed(7)).
 
 set.seed(42)
 n <- 90L # 3 groups x 30 subjects
@@ -51,21 +55,6 @@ for (i in seq_along(missing_subj)) {
     if (miss_mod[i] == 3L) Prot_miss[s, ] <- NA_real_
 }
 
-#' Example dataset for WOVEN
-#'
-#' A small simulated three-modality dataset (90 subjects) designed for
-#' illustrating package functions. Includes a complete version and a
-#' block-missing version (~33% MCAR block-missingness).
-#'
-#' @format A list with components:
-#' \describe{
-#'   \item{X_complete}{List of three matrices (RNA 90x25, Methylation 90x20,
-#'     Proteomics 90x15) with no missing values.}
-#'   \item{X_missing}{Same list with ~33% of subjects missing one modality block.}
-#'   \item{Y}{Character vector of 90 class labels: "CN", "MCI", "AD" (30 each).}
-#' }
-#' @source Simulated data; see data-raw/make_woven_example.R
-"woven_example"
 
 woven_example <- list(
     X_complete = list(RNA = RNA, Methylation = Methyl, Proteomics = Prot),
@@ -73,5 +62,8 @@ woven_example <- list(
     Y          = Y
 )
 
-usethis::use_data(woven_example, overwrite = TRUE)
+save(woven_example,
+    file = file.path("data", "woven_example.rda"),
+    compress = "bzip2"
+)
 cat("woven_example saved to data/woven_example.rda\n")

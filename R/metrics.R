@@ -1,4 +1,4 @@
-# metrics.R  -- Evaluation metric battery for WOVEN benchmarking
+# metrics.R  -- evaluation metrics for WOVEN and other latent embeddings
 #
 # All functions take a latent matrix Z (n x K) and return a scalar or named vector.
 # Designed to work on: WOVEN output, DIABLO variate scores, MOFA+ factor scores.
@@ -9,13 +9,18 @@
 #   woven_nmi              -- normalized mutual information (label recovery)
 #   woven_rv               -- RV coefficient vs ground-truth factor matrix
 #   woven_ess_retention    -- effective sample size retention (N_used / N_total)
-#   woven_effect_bias      -- subgroup effect estimate bias (CER-specific metric)
+#   woven_effect_bias      -- subgroup treatment-effect estimate bias
 #   woven_nystrom_error    -- leave-anchor-out Nystrom projection error
 #   woven_all_metrics      -- compute full battery, returns named list
 
 #  Silhouette
 
 #' Average silhouette width
+#'
+#' Works on any n x K latent score matrix, so the same metric can be
+#' computed for WOVEN and for embeddings from other methods (for example
+#' DIABLO variates) when comparing them. [woven_metrics()] computes it
+#' directly from a fit.
 #'
 #' @param Z numeric matrix n x K (latent scores)
 #' @param labels integer or factor of length n (subgroup labels)
@@ -31,7 +36,7 @@ woven_silhouette <- function(Z, labels) {
     if (length(unique(labels)) < 2L) {
         return(NA_real_)
     }
-    d <- dist(Z)
+    d <- stats::dist(Z)
     sw <- cluster::silhouette(labels, d)
     mean(sw[, "sil_width"])
 }
@@ -39,6 +44,11 @@ woven_silhouette <- function(Z, labels) {
 #  Davies-Bouldin
 
 #' Davies-Bouldin index
+#'
+#' Works on any n x K latent score matrix, so the same metric can be
+#' computed for WOVEN and for embeddings from other methods (for example
+#' DIABLO variates) when comparing them. [woven_metrics()] computes it
+#' directly from a fit.
 #'
 #' DB = (1/K) sum_i max_\{j != i\} (s_i + s_j) / d(c_i, c_j)
 #' where s_i = mean intra-cluster distance, d(c_i, c_j) = centroid distance.
@@ -89,8 +99,17 @@ woven_davies_bouldin <- function(Z, labels) {
 
 #' Normalized mutual information between cluster assignments and true labels
 #'
-#' Uses k-means on Z to get cluster assignments, then computes NMI.
-#' k-means run 10 times to reduce initialization variance.
+#' Works on any n x K latent score matrix, so the same metric can be
+#' computed for WOVEN and for embeddings from other methods (for example
+#' DIABLO variates) when comparing them. [woven_metrics()] computes it
+#' directly from a fit.
+#'
+#' Clusters Z with k-means and computes the normalized mutual information
+#' between the cluster assignments and \code{labels}. k-means uses
+#' \code{n_start} random starts, so the result depends on R's random number
+#' generator: call \code{set.seed()} first for a reproducible value (the
+#' package itself never sets the seed). [woven_metrics()] and
+#' \code{summary()} call this function and inherit the same behaviour.
 #'
 #' @param Z numeric matrix n x K
 #' @param labels integer or factor of length n (true labels)
@@ -98,9 +117,9 @@ woven_davies_bouldin <- function(Z, labels) {
 #' @param n_start integer, k-means random starts
 #' @return scalar in [0, 1], higher is better
 #' @examples
-#' set.seed(1)
-#' Z <- matrix(rnorm(40 * 2), 40, 2)
+#' Z <- rbind(matrix(rnorm(40), 20, 2), matrix(rnorm(40, mean = 3), 20, 2))
 #' labels <- rep(1:2, each = 20)
+#' set.seed(1) # k-means is random; set the seed for a reproducible result
 #' woven_nmi(Z, labels)
 #' @export
 woven_nmi <- function(Z, labels, n_cl = NULL, n_start = 10L) {
@@ -110,7 +129,7 @@ woven_nmi <- function(Z, labels, n_cl = NULL, n_start = 10L) {
         return(NA_real_)
     }
 
-    km <- kmeans(Z, centers = n_cl, nstart = n_start, iter.max = 100L)
+    km <- stats::kmeans(Z, centers = n_cl, nstart = n_start, iter.max = 100L)
     pred <- km$cluster
 
     # NMI via entropy decomposition (no external package needed)
@@ -143,11 +162,15 @@ woven_nmi <- function(Z, labels, n_cl = NULL, n_start = 10L) {
 
 #' RV coefficient between latent scores and ground-truth factor matrix
 #'
+#' Works on any n x K latent score matrix, e.g. to compare an embedding
+#' with known factors in a simulation.
+#'
 #' RV(X, Y) = trace(X X' Y Y') / sqrt(trace(X X' X X') * trace(Y Y' Y Y'))
 #' Measures similarity of two cross-product matrices; 1 = identical subspace.
 #'
 #' @param Z numeric matrix n x K (inferred latent scores)
-#' @param Z_true numeric matrix n x K_true (ground-truth factor scores from SUMO)
+#' @param Z_true numeric matrix n x K_true (e.g. ground-truth factor scores
+#'   in a simulation)
 #' @return scalar in [0, 1], higher is better
 #' @examples
 #' set.seed(1)
@@ -174,11 +197,16 @@ woven_rv <- function(Z, Z_true) {
 
 #  Effective sample size retention
 
-#' Effective sample size retention
+#' Effective sample size (ESS) retention
+#'
+#' The fraction of the cohort that a method can score: \code{n_used /
+#' n_total}. For WOVEN, every subject with at least one observed modality is
+#' scored. A complete-case method such as DIABLO scores only subjects
+#' observed in every modality, so its retention equals the anchor fraction.
 #'
 #' @param n_used integer, number of subjects with a latent score
 #' @param n_total integer, total subjects in dataset
-#' @return scalar in [0, 1], higher is better (DIABLO structurally caps at overlap fraction)
+#' @return scalar in [0, 1], higher is better
 #' @examples
 #' woven_ess_retention(n_used = 80, n_total = 100)
 #' @export
@@ -189,11 +217,13 @@ woven_ess_retention <- function(n_used, n_total) {
 
 #  Subgroup effect estimate bias
 
-#' CER-specific: subgroup effect estimate bias
+#' Subgroup treatment-effect estimate bias
 #'
-#' Fits a linear model of a continuous outcome on a binary treatment indicator,
-#' separately within each subgroup defined by `labels`. Compares estimated
-#' treatment effect to the known true effect (from simulation ground truth).
+#' For simulation studies where the true treatment effect in each subgroup is
+#' known. Within each subgroup defined by \code{labels}, fits a linear model
+#' of a continuous outcome on a binary treatment indicator, adjusting for the
+#' latent scores \code{Z}, and compares the estimated treatment effect with
+#' the true effect. Subgroups with fewer than 5 subjects are skipped.
 #'
 #' bias_g = |estimated_g - true_g| / |true_g|   (relative)
 #' Returns mean bias across subgroups.
@@ -202,16 +232,17 @@ woven_ess_retention <- function(n_used, n_total) {
 #' @param outcome numeric vector of length n (simulated continuous outcome)
 #' @param treatment integer/logical vector of length n (0/1 treatment indicator)
 #' @param labels integer or factor of length n (subgroup labels)
-#' @param true_effects named numeric vector, true treatment effect per subgroup level
+#' @param true_effects numeric vector, true treatment effect per subgroup, in
+#'   the order of \code{levels(as.factor(labels))}
 #' @return scalar >= 0, lower is better
 #' @examples
 #' set.seed(1)
-#' n <- 60
+#' n <- 200
 #' Z <- matrix(rnorm(n * 3), n, 3)
-#' outcome <- rnorm(n)
 #' treatment <- rep(0:1, n / 2)
 #' labels <- rep(1:2, each = n / 2)
 #' true_eff <- c(0.5, 1.0)
+#' outcome <- true_eff[labels] * treatment + Z[, 1] + rnorm(n, sd = 0.5)
 #' woven_effect_bias(Z, outcome, treatment, labels, true_eff)
 #' @export
 woven_effect_bias <- function(Z, outcome, treatment, labels, true_effects) {
@@ -227,12 +258,12 @@ woven_effect_bias <- function(Z, outcome, treatment, labels, true_effects) {
         }
 
         df <- data.frame(y = outcome[idx], trt = treatment[idx], Z[idx, , drop = FALSE])
-        fit <- tryCatch(lm(y ~ ., data = df), error = function(e) NULL)
+        fit <- tryCatch(stats::lm(y ~ ., data = df), error = function(e) NULL)
         if (is.null(fit)) {
             return(NA_real_)
         }
 
-        est <- coef(fit)["trt"]
+        est <- stats::coef(fit)[["trt"]]
         true <- true_effects[gi]
         if (is.na(true) || abs(true) < 1e-12) {
             return(NA_real_)
@@ -247,80 +278,105 @@ woven_effect_bias <- function(Z, outcome, treatment, labels, true_effects) {
 
 #' Leave-anchor-out Nystrom projection error
 #'
-#' For each held-out anchor subject, refits WOVEN without it, projects via
-#' direct W scoring, and computes ||Z_proj - Z_direct||.
-#' Quantifies how well the projection generalizes across anchor subsets.
+#' A diagnostic for how stable the projection of an unseen subject is. For
+#' each of \code{n_loo} randomly chosen anchor subjects, WOVEN is refitted
+#' without that subject (same hyperparameters as \code{fit}), the held-out
+#' subject is projected with the refitted projection matrices (the linear
+#' Nystrom out-of-sample extension used for block-missing subjects), and the
+#' Euclidean distance to its latent score in the full fit
+#' (\code{latent_scores(fit)}) is recorded. The function
+#' returns the mean distance. Small values mean that a subject's latent score
+#' does not depend much on whether it was in the training set.
+#'
+#' Because latent dimensions are identified only up to sign, each refitted
+#' dimension is sign-aligned to the full fit before the distance is taken.
+#' The anchors to hold out are drawn with \code{sample()}, so the result
+#' depends on R's random number generator: call \code{set.seed()} first for
+#' a reproducible value (the package itself never sets the seed).
 #'
 #' @param fit a woven object from [woven()]
-#' @param X_list list of complete (no block-missing) modality matrices, same
-#'   structure as passed to [woven()]
-#' @param n_loo integer, number of anchors to hold out (default min(20, n_a))
-#' @param sigma_proj unused, kept for compatibility
-#' @return scalar >= 0, lower is better (mean Frobenius error per anchor)
+#' @param X_list the same list of modality matrices passed to [woven()],
+#'   on the original (unscaled) feature scale
+#' @param n_loo integer, number of anchors to hold out, between 1 and the
+#'   number of anchors (default \code{min(20, n_a)})
+#' @return scalar >= 0, lower is better (mean distance per held-out anchor)
 #' @examples
 #' data(woven_example)
-#' fit <- woven(woven_example$X_complete, Y = woven_example$Y, K = 3L)
+#' fit <- woven(woven_example$X_complete,
+#'     Y = woven_example$Y, K = 3L,
+#'     verbose = FALSE
+#' )
+#' set.seed(1) # held-out anchors are sampled at random
 #' woven_nystrom_error(fit, woven_example$X_complete, n_loo = 5L)
 #' @export
-woven_nystrom_error <- function(fit, X_list, n_loo = NULL, sigma_proj = NULL) {
-    if (!inherits(fit, "woven")) stop("fit must be a woven object.")
+woven_nystrom_error <- function(fit, X_list, n_loo = NULL) {
+    if (!methods::is(fit, "woven")) stop("fit must be a woven object.")
+    if (!is.list(X_list) || length(X_list) != fit@V ||
+        nrow(X_list[[1L]]) != fit@n) {
+        stop(sprintf(
+            "X_list must be the list of %d matrices (n = %d) used to fit `fit`.",
+            fit@V, fit@n
+        ), call. = FALSE)
+    }
     anchor_idx <- fit@anchor_idx
     n_a <- length(anchor_idx)
-    n_total <- nrow(X_list[[1L]])
     if (is.null(n_loo)) n_loo <- min(20L, n_a)
-    n_loo <- min(n_loo, n_a)
+    if (length(n_loo) != 1L || !is.numeric(n_loo) || is.na(n_loo) ||
+        n_loo < 1L || n_loo > n_a || n_loo != round(n_loo)) {
+        stop(sprintf(
+            "n_loo must be a single integer between 1 and the number of anchors (%d).",
+            n_a
+        ), call. = FALSE)
+    }
+    if (isTRUE(fit@scaled) && !is.null(fit@scale_center)) {
+        X_list <- .scale_apply(X_list, fit@scale_center, fit@scale_scale)
+    }
     loo_set <- sample(seq_len(n_a), n_loo)
-    V <- length(fit@W_list)
 
     errors <- vapply(loo_set, function(j) {
         held_out <- anchor_idx[j]
         remain_idx <- anchor_idx[-j]
-
-        # True score from full fit
-        Z_true <- Reduce("+", lapply(fit@Z_anchors, function(Z) Z[j, , drop = FALSE])) / V
-
-        # LOO fit without this anchor
         X_loo <- lapply(X_list, function(X) {
-            Xi <- X
-            Xi[held_out, ] <- NA_real_
-            Xi
+            X[held_out, ] <- NA_real_
+            X
         })
-        # woven_mcca_dual requires length(Y) == nrow(X_list[[1]]); only the
-        # anchor positions are ever read (Y_a <- Y[anchor_idx]), so
-        # non-anchor and held-out positions are left NA.
-        Y_full <- rep(NA_integer_, n_total)
-        Y_full[remain_idx] <- as.integer(factor(fit@Y_anchor[-j], levels = fit@Y_levels))
+        # Only anchor positions of Y are read by the solver.
+        Y_full <- rep(NA_integer_, fit@n)
+        Y_full[remain_idx] <- fit@Y_anchor[-j]
         mini <- tryCatch(
-            woven_mcca_dual(X_loo,
-                anchor_idx = remain_idx,
-                Y = Y_full,
-                K = fit@K, lambdas = fit@lambdas,
-                gamma_y = fit@gamma_y, verbose = FALSE
+            # Input warnings (e.g. a small anchor set) were already given
+            # when `fit` was made; muffle the repeats from each refit.
+            withCallingHandlers(
+                woven_mcca_dual(X_loo,
+                    anchor_idx = remain_idx, Y = Y_full,
+                    K = fit@K, lambdas = fit@lambdas, gamma_y = fit@gamma_y,
+                    k_nn = fit@k_nn, ridge_w = fit@ridge_w,
+                    screen_top = fit@screen_top, verbose = FALSE
+                ),
+                warning = function(w) invokeRestart("muffleWarning")
             ),
             error = function(e) NULL
         )
-        if (is.null(mini)) {
+        if (is.null(mini) || mini$K != fit@K) {
             return(NA_real_)
         }
-
-        # Direct W projection of held-out subject
-        Xh <- lapply(seq_len(V), function(v) X_list[[v]][held_out, , drop = FALSE])
-        Z_proj <- Reduce("+", lapply(seq_len(V), function(v) {
-            Xh[[v]] %*% mini$W_list[[v]]
-        })) / V
-
-        sqrt(sum((Z_proj - Z_true)^2))
+        # Sign-align each refitted dimension to the full fit, using the
+        # remaining anchors' projected scores under both fits.
+        X_rem <- lapply(X_list, function(X) X[remain_idx, , drop = FALSE])
+        Z_rem <- .project_views(X_rem, mini$W_list, fit@K)
+        sgn <- sign(colSums(fit@Z[remain_idx, , drop = FALSE] * Z_rem))
+        sgn[sgn == 0] <- 1
+        Xh <- lapply(X_list, function(X) X[held_out, , drop = FALSE])
+        Z_proj <- sweep(.project_views(Xh, mini$W_list, fit@K), 2L, sgn, "*")
+        sqrt(sum((Z_proj - fit@Z[held_out, , drop = FALSE])^2))
     }, numeric(1L))
 
     mean(errors, na.rm = TRUE)
 }
 
-#  Balanced Error Rate (BER)
-
-
 #  Full metric battery
 
-#' Compute full WOVEN evaluation metric battery
+#' Compute the full metric battery on a latent score matrix
 #'
 #' @param Z numeric matrix n x K (consensus latent scores)
 #' @param labels integer or factor of length n
@@ -329,21 +385,23 @@ woven_nystrom_error <- function(fit, X_list, n_loo = NULL, sigma_proj = NULL) {
 #' @param outcome optional numeric vector (for effect bias)
 #' @param treatment optional 0/1 vector (for effect bias)
 #' @param true_effects optional named numeric (for effect bias)
-#' @param fit optional WOVEN fit object (for Nystrom LOO error)
-#' @param X1 optional matrix (for Nystrom LOO error)
-#' @param X2 optional matrix (for Nystrom LOO error)
-#' @param n_loo integer, anchors to hold out for Nystrom LOO (default 20)
+#' @param fit optional WOVEN fit object (for the Nystrom LOO error)
+#' @param X_list optional list of modality matrices used to fit \code{fit}
+#'   (for the Nystrom LOO error)
+#' @param n_loo integer, anchors to hold out for the Nystrom LOO error
+#'   (default \code{min(20, n_a)})
+#' @details \code{woven_nmi()} and \code{woven_nystrom_error()} are random;
+#'   set the seed before calling for reproducible values.
 #' @return named list of metric values
-#' @keywords internal
+#' @noRd
 woven_all_metrics <- function(Z, labels, n_total,
                               Z_true = NULL,
                               outcome = NULL,
                               treatment = NULL,
                               true_effects = NULL,
                               fit = NULL,
-                              X1 = NULL,
-                              X2 = NULL,
-                              n_loo = 20L) {
+                              X_list = NULL,
+                              n_loo = NULL) {
     stopifnot(nrow(Z) == length(labels))
 
     out <- list(
@@ -352,10 +410,10 @@ woven_all_metrics <- function(Z, labels, n_total,
         nmi             = woven_nmi(Z, labels),
         ess_retention   = woven_ess_retention(nrow(Z), n_total)
     )
-    # BER is NOT computed here. It requires per-fold DR refitting to avoid
-    # circularity: supervised methods encode labels into Z, so fixed-Z BER
-    # recovers labels by construction. BER is computed in benchmark_one_rep.R
-    # via ber_held_out_lda(): DR refit per fold, test subjects never seen during W fit.
+    # Classification error is deliberately not computed here: a supervised
+    # embedding encodes the labels into Z, so error measured on the same Z
+    # is optimistic by construction. It must be estimated by refitting the
+    # model within each cross-validation fold.
 
     if (!is.null(Z_true)) {
         out$rv_coefficient <- woven_rv(Z, Z_true)
@@ -365,8 +423,8 @@ woven_all_metrics <- function(Z, labels, n_total,
         out$effect_bias <- woven_effect_bias(Z, outcome, treatment, labels, true_effects)
     }
 
-    if (!is.null(fit) && !is.null(X1) && !is.null(X2)) {
-        out$nystrom_error <- woven_nystrom_error(fit, X1, X2, n_loo = n_loo)
+    if (!is.null(fit) && !is.null(X_list)) {
+        out$nystrom_error <- woven_nystrom_error(fit, X_list, n_loo = n_loo)
     }
 
     out
@@ -374,16 +432,16 @@ woven_all_metrics <- function(Z, labels, n_total,
 
 #' Convenience wrapper: compute core metrics directly from a woven fit
 #'
-#' Calls [woven_all_metrics()] using \code{Z(fit)} and the fit's subject
-#' count so you
-#' do not need to extract them manually. Returns silhouette, Davies-Bouldin,
-#' NMI, and ESS retention as a named numeric vector.
+#' Computes silhouette width, Davies-Bouldin index, NMI and ESS retention on
+#' the subjects the fit scored, using \code{latent_scores(fit)} and the fit's
+#' subject count. NMI uses k-means, so call \code{set.seed()} first for
+#' reproducible values.
 #'
 #' @param fit woven object from [woven()]
 #' @param labels integer, factor, or character vector of length n with subgroup
 #'   labels for all subjects (same Y passed to [woven()])
-#' @param ... additional arguments forwarded to [woven_all_metrics()]
-#' @return named numeric vector of metric values, printed as a tidy table
+#' @return named numeric vector with elements \code{Silhouette},
+#'   \code{Davies-Bouldin}, \code{NMI} and \code{ESS}
 #' @examples
 #' set.seed(1)
 #' n <- 40
@@ -396,19 +454,20 @@ woven_all_metrics <- function(Z, labels, n_total,
 #' X1[miss[, 1], ] <- NA
 #' X2[miss[, 2], ] <- NA
 #' fit <- woven(list(X1, X2), Y = Y, K = K)
+#' set.seed(1) # NMI uses k-means
 #' woven_metrics(fit, Y)
-#' @seealso [woven_all_metrics()], [woven_silhouette()], [woven_nmi()]
+#' @seealso [woven_silhouette()], [woven_davies_bouldin()], [woven_nmi()],
+#'   [woven_ess_retention()]
 #' @export
-woven_metrics <- function(fit, labels, ...) {
-    stopifnot(inherits(fit, "woven"))
+woven_metrics <- function(fit, labels) {
+    stopifnot(methods::is(fit, "woven"))
     stopifnot(length(labels) == fit@n)
 
     scored <- !is.na(fit@Z[, 1L])
     res <- woven_all_metrics(
         Z       = fit@Z[scored, , drop = FALSE],
         labels  = labels[scored],
-        n_total = fit@n,
-        ...
+        n_total = fit@n
     )
 
     out <- unlist(res[c("silhouette", "davies_bouldin", "nmi", "ess_retention")])

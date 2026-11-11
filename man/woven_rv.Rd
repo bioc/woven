@@ -9,12 +9,17 @@ woven_rv(Z, Z_true)
 \arguments{
 \item{Z}{numeric matrix n x K (inferred latent scores)}
 
-\item{Z_true}{numeric matrix n x K_true (ground-truth factor scores from SUMO)}
+\item{Z_true}{numeric matrix n x K_true (e.g. ground-truth factor scores
+in a simulation)}
 }
 \value{
 scalar in [0, 1], higher is better
 }
 \description{
+Works on any n x K latent score matrix, e.g. to compare an embedding
+with known factors in a simulation.
+}
+\details{
 RV(X, Y) = trace(X X' Y Y') / sqrt(trace(X X' X X') * trace(Y Y' Y Y'))
 Measures similarity of two cross-product matrices; 1 = identical subspace.
 }

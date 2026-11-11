@@ -19,12 +19,22 @@ woven_nmi(Z, labels, n_cl = NULL, n_start = 10L)
 scalar in [0, 1], higher is better
 }
 \description{
-Uses k-means on Z to get cluster assignments, then computes NMI.
-k-means run 10 times to reduce initialization variance.
+Works on any n x K latent score matrix, so the same metric can be
+computed for WOVEN and for embeddings from other methods (for example
+DIABLO variates) when comparing them. [woven_metrics()] computes it
+directly from a fit.
+}
+\details{
+Clusters Z with k-means and computes the normalized mutual information
+between the cluster assignments and \code{labels}. k-means uses
+\code{n_start} random starts, so the result depends on R's random number
+generator: call \code{set.seed()} first for a reproducible value (the
+package itself never sets the seed). [woven_metrics()] and
+\code{summary()} call this function and inherit the same behaviour.
 }
 \examples{
-set.seed(1)
-Z <- matrix(rnorm(40 * 2), 40, 2)
+Z <- rbind(matrix(rnorm(40), 20, 2), matrix(rnorm(40, mean = 3), 20, 2))
 labels <- rep(1:2, each = 20)
+set.seed(1) # k-means is random; set the seed for a reproducible result
 woven_nmi(Z, labels)
 }

@@ -65,10 +65,10 @@ test_that("accessor generics match direct slot access", {
         Y = d$groups, anchor_idx = d$anchor_idx,
         K = d$K, verbose = FALSE
     )
-    expect_identical(Z(fit), fit@Z)
-    expect_identical(WList(fit), fit@W_list)
-    expect_identical(anchorIdx(fit), fit@anchor_idx)
-    expect_identical(singularValues(fit), fit@singular_values)
+    expect_identical(latent_scores(fit), fit@Z)
+    expect_identical(projection_matrices(fit), fit@W_list)
+    expect_identical(anchor_indices(fit), fit@anchor_idx)
+    expect_identical(singular_values(fit), fit@singular_values)
 })
 
 test_that("woven() errors if anchor_idx shorter than K", {

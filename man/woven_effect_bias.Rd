@@ -2,7 +2,7 @@
 % Please edit documentation in R/metrics.R
 \name{woven_effect_bias}
 \alias{woven_effect_bias}
-\title{CER-specific: subgroup effect estimate bias}
+\title{Subgroup treatment-effect estimate bias}
 \usage{
 woven_effect_bias(Z, outcome, treatment, labels, true_effects)
 }
@@ -15,15 +15,18 @@ woven_effect_bias(Z, outcome, treatment, labels, true_effects)
 
 \item{labels}{integer or factor of length n (subgroup labels)}
 
-\item{true_effects}{named numeric vector, true treatment effect per subgroup level}
+\item{true_effects}{numeric vector, true treatment effect per subgroup, in
+the order of \code{levels(as.factor(labels))}}
 }
 \value{
 scalar >= 0, lower is better
 }
 \description{
-Fits a linear model of a continuous outcome on a binary treatment indicator,
-separately within each subgroup defined by `labels`. Compares estimated
-treatment effect to the known true effect (from simulation ground truth).
+For simulation studies where the true treatment effect in each subgroup is
+known. Within each subgroup defined by \code{labels}, fits a linear model
+of a continuous outcome on a binary treatment indicator, adjusting for the
+latent scores \code{Z}, and compares the estimated treatment effect with
+the true effect. Subgroups with fewer than 5 subjects are skipped.
 }
 \details{
 bias_g = |estimated_g - true_g| / |true_g|   (relative)
@@ -31,11 +34,11 @@ Returns mean bias across subgroups.
 }
 \examples{
 set.seed(1)
-n <- 60
+n <- 200
 Z <- matrix(rnorm(n * 3), n, 3)
-outcome <- rnorm(n)
 treatment <- rep(0:1, n / 2)
 labels <- rep(1:2, each = n / 2)
 true_eff <- c(0.5, 1.0)
+outcome <- true_eff[labels] * treatment + Z[, 1] + rnorm(n, sd = 0.5)
 woven_effect_bias(Z, outcome, treatment, labels, true_eff)
 }

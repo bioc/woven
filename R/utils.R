@@ -1,64 +1,37 @@
-# utils.R  -- Internal matrix utilities for WOVEN
+# utils.R -- internal helpers shared across the package
 
-# RSpectra is Suggests: use it when available, fall back to base R silently.
-# Both helpers return the same structure as the RSpectra originals.
-.svds_safe <- function(X, k) {
-    if (requireNamespace("RSpectra", quietly = TRUE)) {
-        return(RSpectra::svds(X, k = k))
-    }
-    k <- min(k, nrow(X), ncol(X))
-    sv <- svd(X, nu = k, nv = k)
-    list(
-        u = sv$u[, seq_len(k), drop = FALSE],
-        d = sv$d[seq_len(k)],
-        v = sv$v[, seq_len(k), drop = FALSE]
-    )
+# Logical vector: TRUE for rows in which every entry is NA, i.e. subjects with
+# no data for that modality (a block-missing row).
+.block_missing_rows <- function(X) {
+    rowSums(is.na(X)) == ncol(X)
 }
 
-.eigs_sym_safe <- function(B, k) {
-    if (requireNamespace("RSpectra", quietly = TRUE)) {
-        return(RSpectra::eigs_sym(B, k = k, which = "LM"))
-    }
-    eig <- eigen(B, symmetric = TRUE)
-    list(
-        values = eig$values[seq_len(k)],
-        vectors = eig$vectors[, seq_len(k), drop = FALSE]
-    )
+# Logical vector: TRUE for columns in which every entry is NA.
+.all_na_cols <- function(X) {
+    colSums(is.na(X)) == nrow(X)
 }
 
-#' Compute regularized B matrix: B_v = X^T X + lambda * Omega
-#'
-#' @param X numeric matrix, n x p (all samples, full modality)
-#' @param lambda non-negative regularization weight
-#' @param Omega sparse p x p Laplacian (from build_laplacian, feature space)
-#'   OR NULL to use sample-space Laplacian (when p >> n, use kernel trick)
-#' @return dense p x p symmetric positive definite matrix
-#' @keywords internal
-compute_B <- function(X, lambda, Omega, XtX_precomp = NULL) {
-    XtX <- if (!is.null(XtX_precomp)) {
-        XtX_precomp
-    } else {
-        Xc <- na_impute_median(X)
-        crossprod(Xc)
-    }
-    if (lambda == 0 || is.null(Omega)) {
-        return(as.matrix(XtX))
-    }
-    as.matrix(XtX + lambda * Omega)
+# Label used to name a subject in error messages: its row name if present,
+# otherwise its integer row index.
+.subject_ids <- function(X_list, idx) {
+    rn <- rownames(X_list[[1L]])
+    if (is.null(rn)) as.character(idx) else rn[idx]
 }
 
-# Internal: standardize each modality's features to zero mean and unit variance
-# using observed-value statistics (matching DIABLO's scale=TRUE and IntegrAO's
-# normalization). Block-missing (all-NA) rows stay NA. Returns the standardized
-# X_list plus per-feature center/scale so out-of-sample subjects can be scaled
-# identically in woven_scores()/woven_predict().
+# Standardize each modality's features to zero mean and unit variance using
+# observed-value statistics. Block-missing (all-NA) rows stay NA. Returns the
+# standardized X_list plus per-feature center/scale so out-of-sample subjects
+# can be scaled identically in woven_scores()/woven_predict().
 .scale_fit <- function(X_list) {
     fitted <- lapply(X_list, function(X) {
         ctr <- colMeans(X, na.rm = TRUE)
         scl <- apply(X, 2L, stats::sd, na.rm = TRUE)
         ctr[!is.finite(ctr)] <- 0
         scl[!is.finite(scl) | scl == 0] <- 1
-        list(X = sweep(sweep(X, 2L, ctr, "-"), 2L, scl, "/"), center = ctr, scale = scl)
+        list(
+            X = sweep(sweep(X, 2L, ctr, "-"), 2L, scl, "/"),
+            center = ctr, scale = scl
+        )
     })
     Xs <- lapply(fitted, `[[`, "X")
     names(Xs) <- names(X_list)
@@ -69,124 +42,194 @@ compute_B <- function(X, lambda, Omega, XtX_precomp = NULL) {
     )
 }
 
-# Internal: apply stored center/scale (from .scale_fit) to new modality matrices.
+# Apply stored center/scale (from .scale_fit) to new modality matrices.
 .scale_apply <- function(X_list, centers, scales) {
-    lapply(seq_along(X_list), function(v) {
+    out <- lapply(seq_along(X_list), function(v) {
         sweep(sweep(X_list[[v]], 2L, centers[[v]], "-"), 2L, scales[[v]], "/")
     })
+    names(out) <- names(X_list)
+    out
 }
 
-# Internal: drop all-NA rows, impute feature-level NAs with column median
+# Drop block-missing rows and all-NA columns, then impute any remaining
+# feature-level NAs (scattered within otherwise observed rows) with the
+# column median. Never used to fill a whole missing modality block.
 na_impute_median <- function(X) {
-    # Drop block-missing rows (all NA)
-    all_na_row <- apply(X, 1, function(r) all(is.na(r)))
-    Xc <- X[!all_na_row, , drop = FALSE]
-    # Drop all-NA columns (can't impute)
-    all_na_col <- apply(Xc, 2, function(v) all(is.na(v)))
-    Xc <- Xc[, !all_na_col, drop = FALSE]
-    # Impute remaining feature-level NAs with column median
+    Xc <- X[!.block_missing_rows(X), , drop = FALSE]
+    Xc <- Xc[, !.all_na_cols(Xc), drop = FALSE]
     col_med <- MatrixGenerics::colMedians(Xc, na.rm = TRUE)
-    for (j in seq_len(ncol(Xc))) {
-        na_j <- is.na(Xc[, j])
-        if (any(na_j)) Xc[na_j, j] <- col_med[j]
+    for (j in which(colSums(is.na(Xc)) > 0L)) {
+        Xc[is.na(Xc[, j]), j] <- col_med[j]
     }
-    # Final safety: replace any remaining non-finite values with 0
     Xc[!is.finite(Xc)] <- 0
     Xc
 }
 
-#' Symmetric matrix square root via eigendecomposition
-#'
-#' Returns B^\{1/2\} and B^\{-1/2\} for a symmetric PD matrix.
-#' When p > rank_thresh, uses truncated eigendecomposition via RSpectra  --
-#' B = X^T M X has rank at most n, so only n eigenvectors are non-trivial.
-#'
-#' @param B symmetric PD matrix (p x p)
-#' @param tol relative eigenvalue floor
-#' @param n_rank known upper bound on rank of B (e.g. number of samples).
-#'   If provided and p > n_rank, uses truncated eig with k = min(n_rank, p-1).
-#' @return list with $sqrt and $inv_sqrt (both p x p)
-#' @keywords internal
-mat_sqrt <- function(B, tol = 1e-10, n_rank = NULL) {
-    p <- nrow(B)
-
-    # Truncated path: when p is large but rank is bounded by n_rank
-    use_trunc <- !is.null(n_rank) && p > 500L && n_rank < p
-    if (use_trunc) {
-        k <- min(n_rank, p - 1L)
-        eig <- .eigs_sym_safe(B, k = k)
-        vals <- eig$values
-        vecs <- eig$vectors
-    } else {
-        eig <- eigen(B, symmetric = TRUE)
-        vals <- eig$values
-        vecs <- eig$vectors
-    }
-
-    floor_val <- tol * max(abs(vals))
-    vals_safe <- pmax(vals, floor_val)
-    sqrt_vals <- sqrt(vals_safe)
-    inv_sqrt_vals <- 1 / sqrt_vals
-
-    # Reconstruct p x p matrices from potentially truncated eigenvectors
+# Symmetric matrix square root and inverse square root via eigendecomposition.
+# Eigenvalues are floored at tol * max|eigenvalue| before taking roots.
+mat_sqrt <- function(B, tol = 1e-10) {
+    eig <- eigen(B, symmetric = TRUE)
+    vals <- pmax(eig$values, tol * max(abs(eig$values)))
+    vecs <- eig$vectors
     list(
-        sqrt     = vecs %*% diag(sqrt_vals, length(sqrt_vals)) %*% t(vecs),
-        inv_sqrt = vecs %*% diag(inv_sqrt_vals, length(inv_sqrt_vals)) %*% t(vecs)
+        sqrt = vecs %*% diag(sqrt(vals), length(vals)) %*% t(vecs),
+        inv_sqrt = vecs %*% diag(1 / sqrt(vals), length(vals)) %*% t(vecs)
     )
 }
 
-#' Kernel trick: compute B in sample space when p >> n_a
-#'
-#' When p_v >> n_a, working in feature space costs O(p^2).
-#' Instead compute the n_a x n_a kernel K = X X^T and solve in that space.
-#' Used internally by solver_v2 when p > 5 * n_a.
-#'
-#' @param Xa anchor samples, n_a x p
-#' @param lambda regularization
-#' @param L_sample n x n sample-space Laplacian (for full data n, not just anchors)
-#' @param anchor_idx integer vector of anchor row indices into full data
-#' @return n_a x n_a kernel matrix K_reg = Xa Xa^T + lambda * L_a
-#'   where L_a is the anchor submatrix of the sample Laplacian
-#' @keywords internal
-compute_B_kernel <- function(Xa, lambda, L_sample, anchor_idx) {
-    K <- tcrossprod(Xa) # n_a x n_a
-    if (lambda == 0) {
-        return(K)
+# Validate anchor_idx against X_list. Anchors must be distinct integer row
+# indices in 1..n, and every anchor must be observed (not block-missing) in
+# every modality. Offending subjects are named in the error message.
+.check_anchor_idx <- function(X_list, anchor_idx) {
+    n <- nrow(X_list[[1L]])
+    if (!is.numeric(anchor_idx) || anyNA(anchor_idx) ||
+        any(anchor_idx != round(anchor_idx))) {
+        stop("anchor_idx must be a vector of integer row indices without NA.",
+            call. = FALSE
+        )
     }
-    L_a <- as.matrix(L_sample[anchor_idx, anchor_idx])
-    K + lambda * L_a
+    anchor_idx <- as.integer(anchor_idx)
+    bad <- anchor_idx[anchor_idx < 1L | anchor_idx > n]
+    if (length(bad) > 0L) {
+        stop(sprintf(
+            "anchor_idx contains indices outside 1..%d: %s.",
+            n, paste(utils::head(bad, 10L), collapse = ", ")
+        ), call. = FALSE)
+    }
+    dup <- unique(anchor_idx[duplicated(anchor_idx)])
+    if (length(dup) > 0L) {
+        stop(sprintf(
+            "anchor_idx contains duplicated subjects: %s.",
+            paste(.subject_ids(X_list, utils::head(dup, 10L)), collapse = ", ")
+        ), call. = FALSE)
+    }
+    mod_nm <- names(X_list)
+    if (is.null(mod_nm)) mod_nm <- paste0("modality ", seq_along(X_list))
+    msgs <- character(0)
+    for (v in seq_along(X_list)) {
+        miss <- anchor_idx[.block_missing_rows(
+            X_list[[v]][anchor_idx, , drop = FALSE]
+        )]
+        if (length(miss) > 0L) {
+            msgs <- c(msgs, sprintf(
+                "%s: %s", mod_nm[v],
+                paste(.subject_ids(X_list, utils::head(miss, 10L)),
+                    collapse = ", "
+                )
+            ))
+        }
+    }
+    if (length(msgs) > 0L) {
+        stop(
+            "Anchor subjects must be observed in every modality, but these ",
+            "anchors are missing a whole modality block:\n  ",
+            paste(msgs, collapse = "\n  "),
+            "\nDrop them from anchor_idx, or leave anchor_idx = NULL to ",
+            "detect anchors automatically.",
+            call. = FALSE
+        )
+    }
+    invisible(anchor_idx)
 }
 
-#' Validate inputs before solve
-#'
-#' @param X_list list of modality matrices (n_v x p_v each)
-#' @param anchor_idx integer vector of anchor indices
-#' @param K number of latent dimensions
-#' @return Invisibly returns TRUE if all checks pass; stops with an error otherwise.
-#' @keywords internal
+# Shared input checks for woven() and woven_mcca_dual().
 check_woven_inputs <- function(X_list, anchor_idx, K) {
     V <- length(X_list)
-    if (V < 2) stop("WOVEN requires at least 2 modalities.")
+    if (V < 2L) stop("WOVEN requires at least 2 modalities.", call. = FALSE)
+    ns <- vapply(X_list, nrow, integer(1L))
+    if (length(unique(ns)) > 1L) {
+        stop("All modality matrices must have the same number of rows.",
+            call. = FALSE
+        )
+    }
+    .check_anchor_idx(X_list, anchor_idx)
 
     n_a <- length(anchor_idx)
     if (n_a < K) {
         stop(sprintf(
-            "Anchor set (n_a=%d) must be >= K=%d. Increase anchor set or reduce K.", n_a, K
-        ))
+            "Anchor set (n_a=%d) must be >= K=%d. Use more anchors or reduce K.",
+            n_a, K
+        ), call. = FALSE)
     }
-    if (n_a < 5 * K) {
+    if (n_a < 5L * K) {
+        fmt <- paste0(
+            "Anchor set (n_a=%d) is small relative to K=%d ",
+            "(recommend n_a >= 5K). Results may be unstable."
+        )
         warning(sprintf(
-            "Anchor set (n_a=%d) is small relative to K=%d (recommend n_a >= 5K). Results may be unstable.", n_a, K
-        ))
+            fmt,
+            n_a, K
+        ), call. = FALSE)
     }
-
-    ns <- vapply(X_list, nrow, integer(1L))
-    if (length(unique(ns)) > 1) stop("All modality matrices must have the same number of rows.")
-
+    # Each modality's projection matrix W_v (p_v x K) has rank at most
+    # min(n_a, p_v), so a modality with fewer features than K cannot span
+    # K independent latent directions on its own.
+    p_v <- vapply(X_list, ncol, integer(1L))
+    small <- which(p_v < K)
+    if (length(small) > 0L) {
+        nm <- names(X_list)
+        if (is.null(nm)) nm <- paste0("modality ", seq_len(V))
+        fmt <- paste0(
+            "K=%d exceeds the number of features in %s. Scores from ",
+            "such a modality span at most p_v of the K dimensions ",
+            "(each W_v has rank <= min(n_a, p_v))."
+        )
+        warning(sprintf(
+            fmt,
+            K, paste(sprintf("%s (p=%d)", nm[small], p_v[small]),
+                collapse = ", "
+            )
+        ), call. = FALSE)
+    }
     invisible(TRUE)
 }
 
-# Suppress R CMD check notes for variables used inside closures/lapply
-utils::globalVariables(c(
-    "centroids", "Z_ref_knn", "uniform_p" # woven_predict closures
-))
+# Project subjects into the latent space: for each subject, apply W_v to every
+# modality it has observed and average over those modalities. Feature-level
+# NAs within an observed row contribute zero. Subjects with no observed
+# modality get a row of NA. Used by woven() and woven_scores().
+.project_views <- function(X_list, W_list, K) {
+    n <- nrow(X_list[[1L]])
+    Z_acc <- matrix(0, n, K)
+    obs_cnt <- integer(n)
+    for (v in seq_along(X_list)) {
+        obs <- which(!.block_missing_rows(X_list[[v]]))
+        if (length(obs) == 0L) next
+        Xv_obs <- X_list[[v]][obs, , drop = FALSE]
+        Xv_obs[is.na(Xv_obs)] <- 0
+        Z_acc[obs, ] <- Z_acc[obs, ] + Xv_obs %*% W_list[[v]]
+        obs_cnt[obs] <- obs_cnt[obs] + 1L
+    }
+    none <- obs_cnt == 0L
+    obs_cnt[none] <- 1L
+    Z <- Z_acc / obs_cnt
+    Z[none, ] <- NA_real_
+    dimnames(Z) <- list(rownames(X_list[[1L]]), paste0("Dim", seq_len(K)))
+    Z
+}
+
+# Check that X_list_new matches the modalities and feature counts of a fit.
+.check_new_data <- function(fit, X_list_new) {
+    if (!is.list(X_list_new) || length(X_list_new) != fit@V) {
+        stop(sprintf(
+            "X_list_new must be a list of %d matrices (one per modality).",
+            fit@V
+        ), call. = FALSE)
+    }
+    for (v in seq_len(fit@V)) {
+        p_new <- ncol(X_list_new[[v]])
+        p_fit <- nrow(fit@W_list[[v]])
+        if (!identical(as.integer(p_new), as.integer(p_fit))) {
+            stop(sprintf(
+                "X_list_new[[%d]] (%s) has %d features but model was trained on %d.",
+                v, fit@mod_names[v], p_new, p_fit
+            ), call. = FALSE)
+        }
+    }
+    invisible(TRUE)
+}
+
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+# Suppress R CMD check notes for variables used inside closures
+utils::globalVariables(c("centroids", "Z_ref_knn"))

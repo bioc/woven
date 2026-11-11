@@ -1,6 +1,6 @@
 Package: woven
 Title: Weighted Omics View Embedding via Nystrom for Incomplete Multi-Omics Data
-Version: 0.99.3
+Version: 0.99.4
 Authors@R: c(
     person("Nathan", "Bresette",
            role = c("aut", "cre"),
@@ -14,23 +14,29 @@ Authors@R: c(
            role = "fnd",
            comment = "R56AG079586")
   )
-Description: Supervised multi-omics integration for block-missing ("ragged") data.
-    WOVEN learns a shared latent space across V omics modalities using only
-    fully-observed anchor subjects, then projects block-missing subjects via
-    Nystrom extension without feature-level imputation. Supervision enters
-    through a label-augmented cross-covariance (analogous to DIABLO), and
-    projection matrices can optionally be ridge-regularized and univariately
-    feature-screened for high-dimensional modalities. Designed for
-    comparative effectiveness research where intersection-only methods
-    introduce selection bias.
+Description: Supervised multi-omics integration for block-missing
+    ("ragged") data, where some subjects lack one or more whole omics
+    modalities (assay blocks) rather than scattered individual values. WOVEN
+    fits a shared latent space with SUMCOR (sum of correlations) multi-set
+    canonical correlation analysis, a criterion that maximizes the summed
+    pairwise correlation between modalities' latent scores, using only the
+    anchor subjects observed in every modality; class labels enter through a
+    label-augmented cross-covariance, and per-modality graph Laplacians
+    regularize the fit. Every other subject is then scored from the
+    modalities it has by a Nystrom extension, a way to place new points in an
+    already fitted embedding (for WOVEN's linear embedding, multiplying the
+    observed features by the learned projection matrices), so no missing
+    block is imputed. The effective sample size (ESS) retention, the fraction
+    of subjects a method can score, is therefore the fraction with at least
+    one observed modality, rather than the complete-case fraction.
 License: MIT + file LICENSE
 Encoding: UTF-8
 RoxygenNote: 7.3.3
 URL: https://github.com/NathanBresette/woven
 BugReports: https://github.com/NathanBresette/woven/issues
-biocViews: Software, StatisticalMethod, MultipleComparison, GeneExpression,
-    Transcriptomics, Proteomics, Metabolomics, DimensionReduction,
-    Clustering, Classification, Sequencing
+biocViews: Software, StatisticalMethod, DimensionReduction,
+    Classification, Clustering, GeneExpression, Transcriptomics,
+    Proteomics, Metabolomics
 Depends:
     R (>= 4.5.0)
 Imports:
@@ -38,21 +44,16 @@ Imports:
     MatrixGenerics,
     RANN,
     cluster,
-    parallel,
-    BiocParallel,
     methods,
-    stats
+    stats,
+    utils
 Suggests:
     ggplot2,
-    RSpectra,
     testthat (>= 3.0.0),
     knitr,
     rmarkdown,
+    BiocStyle,
     MultiAssayExperiment,
     SummarizedExperiment
 VignetteBuilder: knitr
 Config/testthat/edition: 3
-Author: Nathan Bresette [aut, cre] (<https://orcid.org/0009-0003-1554-6006>),
-    Ai-Ling Lin [aut],
-    Jianlin Cheng [aut]
-Maintainer: Nathan Bresette <nathanbresette04@gmail.com>

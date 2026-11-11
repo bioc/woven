@@ -4,24 +4,23 @@
 \alias{woven_metrics}
 \title{Convenience wrapper: compute core metrics directly from a woven fit}
 \usage{
-woven_metrics(fit, labels, ...)
+woven_metrics(fit, labels)
 }
 \arguments{
 \item{fit}{woven object from [woven()]}
 
 \item{labels}{integer, factor, or character vector of length n with subgroup
 labels for all subjects (same Y passed to [woven()])}
-
-\item{...}{additional arguments forwarded to [woven_all_metrics()]}
 }
 \value{
-named numeric vector of metric values, printed as a tidy table
+named numeric vector with elements \code{Silhouette},
+  \code{Davies-Bouldin}, \code{NMI} and \code{ESS}
 }
 \description{
-Calls [woven_all_metrics()] using \code{Z(fit)} and the fit's subject
-count so you
-do not need to extract them manually. Returns silhouette, Davies-Bouldin,
-NMI, and ESS retention as a named numeric vector.
+Computes silhouette width, Davies-Bouldin index, NMI and ESS retention on
+the subjects the fit scored, using \code{latent_scores(fit)} and the fit's
+subject count. NMI uses k-means, so call \code{set.seed()} first for
+reproducible values.
 }
 \examples{
 set.seed(1)
@@ -35,8 +34,10 @@ for (i in which(rowSums(miss) == 2)) miss[i, sample(2, 1)] <- FALSE
 X1[miss[, 1], ] <- NA
 X2[miss[, 2], ] <- NA
 fit <- woven(list(X1, X2), Y = Y, K = K)
+set.seed(1) # NMI uses k-means
 woven_metrics(fit, Y)
 }
 \seealso{
-[woven_all_metrics()], [woven_silhouette()], [woven_nmi()]
+[woven_silhouette()], [woven_davies_bouldin()], [woven_nmi()],
+  [woven_ess_retention()]
 }

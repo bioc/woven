@@ -1,62 +1,73 @@
 # accessors.R -- S4 accessor generics for the "woven" class
 #
-# Bioconductor convention favors named accessor functions over direct '@'
-# slot access in user-facing code (documentation, examples, vignettes).
-# These wrap the most commonly used slots of a woven fit; the full slot
-# list is documented at ?`woven-class`.
+# Named accessors are the supported way to read a fit in user code. Names are
+# snake_case to match the rest of the API (woven(), woven_scores(), ...). The
+# full slot list is documented at ?`woven-class`.
 
-#' Consensus latent scores
-#' @param x a \code{\linkS4class{woven}} object
-#' @return numeric matrix, n x K
+#' Accessors for a fitted WOVEN model
+#'
+#' Extract the main results from a \code{\linkS4class{woven}} fit.
+#'
+#' \itemize{
+#'   \item \code{latent_scores()}: n x K matrix of consensus latent scores
+#'     for every subject (anchors and block-missing subjects). Rows of
+#'     subjects with no observed modality are \code{NA}. Row names come from
+#'     the row names of the input matrices (or \code{colData} row names for
+#'     a MultiAssayExperiment).
+#'   \item \code{projection_matrices()}: named list of V projection
+#'     matrices, each p_v x K (features by latent dimensions).
+#'   \item \code{anchor_indices()}: integer row indices of the anchor
+#'     subjects (observed in every modality) used to fit the model.
+#'   \item \code{singular_values()}: length-K vector of supervised canonical
+#'     correlations (eigenvalues of the dual problem), largest first.
+#' }
+#'
+#' @param x a \code{\linkS4class{woven}} object.
+#' @return See Details.
+#' @name woven-accessors
 #' @examples
 #' data(woven_example)
-#' fit <- woven(woven_example$X_complete, Y = woven_example$Y, K = 3L)
-#' dim(Z(fit))
-#' @export
-setGeneric("Z", function(x) standardGeneric("Z"))
+#' fit <- woven(woven_example$X_complete,
+#'     Y = woven_example$Y, K = 3L,
+#'     verbose = FALSE
+#' )
+#' dim(latent_scores(fit))
+#' names(projection_matrices(fit))
+#' length(anchor_indices(fit))
+#' singular_values(fit)
+NULL
 
-#' @rdname Z
+#' @rdname woven-accessors
 #' @export
-setMethod("Z", "woven", function(x) x@Z)
+setGeneric("latent_scores", function(x) standardGeneric("latent_scores"))
 
-#' Per-modality projection matrices
-#' @param x a \code{\linkS4class{woven}} object
-#' @return named list of V numeric matrices, each p_v x K
-#' @examples
-#' data(woven_example)
-#' fit <- woven(woven_example$X_complete, Y = woven_example$Y, K = 3L)
-#' names(WList(fit))
+#' @rdname woven-accessors
 #' @export
-setGeneric("WList", function(x) standardGeneric("WList"))
+setMethod("latent_scores", "woven", function(x) x@Z)
 
-#' @rdname WList
+#' @rdname woven-accessors
 #' @export
-setMethod("WList", "woven", function(x) x@W_list)
+setGeneric(
+    "projection_matrices",
+    function(x) standardGeneric("projection_matrices")
+)
 
-#' Indices of the anchor (fully-observed) subjects
-#' @param x a \code{\linkS4class{woven}} object
-#' @return integer vector
-#' @examples
-#' data(woven_example)
-#' fit <- woven(woven_example$X_complete, Y = woven_example$Y, K = 3L)
-#' length(anchorIdx(fit))
+#' @rdname woven-accessors
 #' @export
-setGeneric("anchorIdx", function(x) standardGeneric("anchorIdx"))
+setMethod("projection_matrices", "woven", function(x) x@W_list)
 
-#' @rdname anchorIdx
+#' @rdname woven-accessors
 #' @export
-setMethod("anchorIdx", "woven", function(x) x@anchor_idx)
+setGeneric("anchor_indices", function(x) standardGeneric("anchor_indices"))
 
-#' Supervised canonical correlations
-#' @param x a \code{\linkS4class{woven}} object
-#' @return numeric vector of length K
-#' @examples
-#' data(woven_example)
-#' fit <- woven(woven_example$X_complete, Y = woven_example$Y, K = 3L)
-#' singularValues(fit)
+#' @rdname woven-accessors
 #' @export
-setGeneric("singularValues", function(x) standardGeneric("singularValues"))
+setMethod("anchor_indices", "woven", function(x) x@anchor_idx)
 
-#' @rdname singularValues
+#' @rdname woven-accessors
 #' @export
-setMethod("singularValues", "woven", function(x) x@singular_values)
+setGeneric("singular_values", function(x) standardGeneric("singular_values"))
+
+#' @rdname woven-accessors
+#' @export
+setMethod("singular_values", "woven", function(x) x@singular_values)
