@@ -113,8 +113,8 @@ utils::globalVariables(c(
 #' woven_plot_vip(fit, modality = 1L)
 #' @seealso [woven_plot_loadings()], [woven_plot_variance()]
 #' @export
-woven_plot_vip <- function(fit, modality = 1L, n_top = 20L,
-                           feature_names = NULL, main = NULL) {
+woven_plot_vip <- function(
+        fit, modality = 1L, n_top = 20L, feature_names = NULL, main = NULL) {
     .require_ggplot2()
     stopifnot(methods::is(fit, "woven"))
     modality <- .resolve_modality(modality, fit)

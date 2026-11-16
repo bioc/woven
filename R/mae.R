@@ -29,20 +29,6 @@
 #'   order of \code{rownames(colData(mae))}
 #' @noRd
 .mae_to_xlist <- function(mae) {
-    # SummarizedExperiment is a dependency of MultiAssayExperiment, so it is
-    # installed whenever MultiAssayExperiment is; both are checked explicitly.
-    for (pkg in c("MultiAssayExperiment", "SummarizedExperiment")) {
-        if (!requireNamespace(pkg, quietly = TRUE)) {
-            fmt <- paste0(
-                "Package '%s' is required to pass a MultiAssayExperiment ",
-                "to woven(). Install it with BiocManager::install('%s')."
-            )
-            stop(sprintf(
-                fmt,
-                pkg, pkg
-            ), call. = FALSE)
-        }
-    }
     primary <- rownames(MultiAssayExperiment::colData(mae))
     exps <- MultiAssayExperiment::experiments(mae)
     smap <- as.data.frame(MultiAssayExperiment::sampleMap(mae))

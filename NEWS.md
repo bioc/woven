@@ -1,3 +1,20 @@
+# woven 0.99.5
+
+* `Depends: R (>= 4.6.0)`, matching the R version the package is built and
+  checked with on Bioconductor.
+* `woven_precompute()` accepts a `MultiAssayExperiment`, converted the same
+  way as in `woven()`, so MAE users can reuse precomputed graphs for tuning.
+  The vignette's Tuning section shows this on the ACC data.
+* `MultiAssayExperiment` and `SummarizedExperiment` moved from Suggests to
+  Imports, since a `MultiAssayExperiment` is now the main input; the
+  `requireNamespace()` guard is gone.
+* `woven()` split into input checking (`.woven_check_input()`), the fit, and
+  result assembly (`.woven_assemble()`) helpers. Results are unchanged.
+* Documentation and vignette now say that precomputed graphs only apply to
+  fits on the same subjects; cross-validation folds are fit without
+  `precomp`. The vignette describes the fold-wise tuning procedure.
+* Code restyled with `styler` (4-space indent).
+
 # woven 0.99.4
 
 ## Changes in behaviour and API

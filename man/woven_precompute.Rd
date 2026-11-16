@@ -7,8 +7,10 @@
 woven_precompute(X_list, k_nn = 10L, scale = TRUE)
 }
 \arguments{
-\item{X_list}{list of V matrices (n x p_v). Block-missing rows (all NA)
-are automatically excluded from the k-NN graph.}
+\item{X_list}{list of V matrices (n x p_v), or a
+\code{MultiAssayExperiment} (converted exactly as in [woven()], so the
+graphs line up with a later \code{woven(mae, ...)} call). Block-missing
+rows (all NA) are automatically excluded from the k-NN graph.}
 
 \item{k_nn}{integer, number of nearest neighbours (default 10)}
 
@@ -26,8 +28,12 @@ list of V sparse Laplacian matrices (n x n), one per modality.
 \description{
 Builds k-NN RBF Laplacians for each modality from the observed data.
 Pass the result to \code{woven(..., precomp = precomp)} to avoid
-rebuilding the graph on every call -- useful for hyperparameter search,
-cross-validation, or sensitivity analysis.
+rebuilding the graph on every call when fitting the same subjects
+several times, for example to compare hyperparameter settings or run a
+sensitivity analysis. The graphs cover exactly the subjects in
+\code{X_list}, so they cannot be reused for fits on a subset of subjects
+(such as cross-validation training folds); fit those without
+\code{precomp}.
 }
 \examples{
 set.seed(1)

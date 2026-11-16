@@ -43,16 +43,16 @@ block.
 
 Methods differ in how they treat such subjects:
 
-* **DIABLO** (Singh et al. 2019, in the mixOmics package) is supervised but
-  needs every subject to have every block, so subjects missing a block are
-  removed before the analysis.
-* **MOFA2** (Argelaguet et al. 2020) accepts samples with whole views missing
-  (coded as `NA`), but it is unsupervised: its factors are not steered
-  towards a class label.
-* **missRows** (Voillet et al. 2016) handles missing individuals in multiple
-  factor analysis by multiple imputation of the missing rows (MI-MFA), then
-  combines the imputed analyses. It is unsupervised and fills in the missing
-  blocks.
+*   **DIABLO** (Singh et al. 2019, in the mixOmics package) is supervised but
+    needs every subject to have every block, so subjects missing a block are
+    removed before the analysis.
+*   **MOFA2** (Argelaguet et al. 2020) accepts samples with whole views missing
+    (coded as `NA`), but it is unsupervised: its factors are not steered
+    towards a class label.
+*   **missRows** (Voillet et al. 2016) handles missing individuals in multiple
+    factor analysis by multiple imputation of the missing rows (MI-MFA), then
+    combines the imputed analyses. It is unsupervised and fills in the missing
+    blocks.
 
 **woven** (Weighted Omics View Embedding via Nystrom) is supervised, like
 DIABLO, and keeps subjects with missing blocks, like MOFA2 and missRows, but
@@ -198,8 +198,10 @@ head(pred)
 truth <- test$C1A.C1B[match(rownames(pred), rownames(colData(test)))]
 has_rppa <- rownames(pred) %in%
     sampleMap(test)$primary[sampleMap(test)$assay == "RPPAArray"]
-table(blocks = ifelse(has_rppa, "all three", "no RPPA"),
-    correct = pred$predicted_class == truth)
+table(
+    blocks = ifelse(has_rppa, "all three", "no RPPA"),
+    correct = pred$predicted_class == truth
+)
 ```
 
 This is one random split, shown to illustrate the workflow; a proper
@@ -286,9 +288,16 @@ woven_plot_variance(fit_sim)
 `gamma_y` sets the weight of the labels (0 gives unsupervised SUMCOR),
 `lambdas` the weight of the graph Laplacians, and `ridge_w` and `screen_top`
 control the projection matrices when a block has many more features than
-there are anchors. Choose them by cross-validated classification error,
-refitting within each fold. Graphs do not depend on these settings, so build
-them once with `woven_precompute()` and pass them to every fit:
+there are anchors. Choose them by cross-validated classification error:
+split the anchors into folds, fit `woven()` on the training subjects of each
+fold (graphs included, so held-out subjects never enter the fit), and score
+the held-out anchors with `woven_predict()`.
+
+When you fit the same subjects several times, for example to compare
+settings on the full data or run a sensitivity analysis, the graphs do not
+depend on these settings, so build them once with `woven_precompute()` and
+pass them to every fit. Precomputed graphs cover exactly the subjects they
+were built on, so they cannot be reused for cross-validation folds.
 
 ```{r precompute}
 pc <- woven_precompute(woven_example$X_missing)
@@ -301,30 +310,42 @@ fits <- lapply(c(0.5, 5), function(g) {
 vapply(fits, function(f) singular_values(f)[1], numeric(1))
 ```
 
+`woven_precompute()` also accepts a MultiAssayExperiment, converted the same
+way as in `woven()`, so the ACC data above can be tuned the same way:
+
+```{r precompute-mae}
+pc_acc <- woven_precompute(acc)
+fit_acc <- woven(acc,
+    Y = "C1A.C1B", K = 2L, gamma_y = 5,
+    precomp = pc_acc, verbose = FALSE
+)
+singular_values(fit_acc)
+```
+
 `woven_precompute()` records whether it scaled the data, and `woven()`
 stops if its own `scale` setting differs.
 
 # Limitations
 
-* woven is supervised. It needs a class label for every subject, and its
-  latent space is built to separate those classes, so it is not a tool for
-  discovering unlabelled structure. Separation measured on the subjects used
-  to fit the model is optimistic; assess it on held-out subjects.
-* The projection matrices are learned from the anchor subjects only, so the
-  anchors must be representative of the cohort. If they differ
-  systematically from subjects with missing blocks, the projections may not
-  transfer.
-* Scoring a subject from the blocks it has assumes that which blocks are
-  missing is unrelated to the outcome beyond what the observed data explain
-  (missing at random). If missingness depends on unobserved values, scores
-  of incomplete subjects can be biased.
-* The model is linear in the features. Nonlinear structure can be passed in
-  through a precomputed kernel for the graph, but the projections stay
-  linear.
-* There should be clearly more anchors than latent dimensions (the package
-  warns when there are fewer than `5 * K`), and each block's projection
-  matrix has rank at most the smaller of its feature count and the number of
-  anchors.
+*   woven is supervised. It needs a class label for every subject, and its
+    latent space is built to separate those classes, so it is not a tool for
+    discovering unlabelled structure. Separation measured on the subjects used
+    to fit the model is optimistic; assess it on held-out subjects.
+*   The projection matrices are learned from the anchor subjects only, so the
+    anchors must be representative of the cohort. If they differ
+    systematically from subjects with missing blocks, the projections may not
+    transfer.
+*   Scoring a subject from the blocks it has assumes that which blocks are
+    missing is unrelated to the outcome beyond what the observed data explain
+    (missing at random). If missingness depends on unobserved values, scores
+    of incomplete subjects can be biased.
+*   The model is linear in the features. Nonlinear structure can be passed in
+    through a precomputed kernel for the graph, but the projections stay
+    linear.
+*   There should be clearly more anchors than latent dimensions (the package
+    warns when there are fewer than `5 * K`), and each block's projection
+    matrix has rank at most the smaller of its feature count and the number of
+    anchors.
 
 # Accessing results
 

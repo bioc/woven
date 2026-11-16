@@ -11,11 +11,17 @@
 #'
 #' Builds k-NN RBF Laplacians for each modality from the observed data.
 #' Pass the result to \code{woven(..., precomp = precomp)} to avoid
-#' rebuilding the graph on every call -- useful for hyperparameter search,
-#' cross-validation, or sensitivity analysis.
+#' rebuilding the graph on every call when fitting the same subjects
+#' several times, for example to compare hyperparameter settings or run a
+#' sensitivity analysis. The graphs cover exactly the subjects in
+#' \code{X_list}, so they cannot be reused for fits on a subset of subjects
+#' (such as cross-validation training folds); fit those without
+#' \code{precomp}.
 #'
-#' @param X_list list of V matrices (n x p_v). Block-missing rows (all NA)
-#'   are automatically excluded from the k-NN graph.
+#' @param X_list list of V matrices (n x p_v), or a
+#'   \code{MultiAssayExperiment} (converted exactly as in [woven()], so the
+#'   graphs line up with a later \code{woven(mae, ...)} call). Block-missing
+#'   rows (all NA) are automatically excluded from the k-NN graph.
 #' @param k_nn integer, number of nearest neighbours (default 10)
 #' @param scale logical, standardize features to unit variance before building
 #'   Laplacians (default TRUE); use the same value passed to [woven()].
@@ -41,8 +47,13 @@
 #' @seealso [woven()]
 #' @export
 woven_precompute <- function(X_list, k_nn = 10L, scale = TRUE) {
+    if (methods::is(X_list, "MultiAssayExperiment")) {
+        X_list <- .mae_to_xlist(X_list)
+    }
     if (!is.list(X_list)) {
-        stop("X_list must be a list of matrices.", call. = FALSE)
+        stop("X_list must be a list of matrices or a MultiAssayExperiment.",
+            call. = FALSE
+        )
     }
     # Build the graph on the same features woven() will fit on: with
     # scale = TRUE, woven() standardizes each modality before building its
@@ -200,8 +211,10 @@ woven_precompute <- function(X_list, k_nn = 10L, scale = TRUE) {
 #'   built with the same \code{scale} value; a mismatch is an error.
 #' @param precomp optional output of [woven_precompute()] -- pre-built
 #'   Laplacians for the same \code{X_list}. Pass this when calling
-#'   \code{woven()} multiple times on the same data (e.g. hyperparameter
-#'   search, cross-validation) to avoid rebuilding the graph each time.
+#'   \code{woven()} multiple times on the same subjects (e.g. comparing
+#'   hyperparameter settings) to avoid rebuilding the graph each time. Not
+#'   usable for fits on a subset of subjects, such as cross-validation
+#'   training folds.
 #'   When supplied, \code{k_nn} is taken from \code{precomp}.
 #' @param verbose logical  -- print progress (default TRUE)
 #'
@@ -261,16 +274,72 @@ woven_precompute <- function(X_list, k_nn = 10L, scale = TRUE) {
 #' @seealso [woven_scores()], [woven_predict()], [woven_metrics()],
 #'   [woven_precompute()], [woven-accessors]
 #' @export
-woven <- function(X_list, Y, anchor_idx = NULL,
-                  K = 5L,
-                  lambdas = 0.1,
-                  gamma_y = 1.0,
-                  k_nn = 10L,
-                  ridge_w = 1e-8,
-                  screen_top = Inf,
-                  scale = TRUE,
-                  precomp = NULL,
-                  verbose = TRUE) {
+woven <- function(
+        X_list, Y, anchor_idx = NULL, K = 5L, lambdas = 0.1, gamma_y = 1.0,
+        k_nn = 10L, ridge_w = 1e-8, screen_top = Inf, scale = TRUE,
+        precomp = NULL, verbose = TRUE) {
+    inp <- .woven_check_input(X_list, Y, anchor_idx, K, verbose)
+    X_list <- inp$X_list
+    Y <- inp$Y
+    anchor_idx <- inp$anchor_idx
+    V <- inp$V
+    n <- inp$n
+
+    Y_fct <- as.factor(Y)
+    Y_labels <- levels(Y_fct) # original label names e.g. "CN","MCI","Dementia"
+    Y <- as.integer(Y_fct)
+
+    if (length(lambdas) == 1L) lambdas <- rep(lambdas, V)
+    stopifnot(length(lambdas) == V)
+
+    if (!is.null(precomp)) {
+        k_nn <- .check_precomp(precomp, V, n, scale, k_nn)
+    }
+
+    #  Standardize features to unit variance so no modality dominates by
+    #  measurement scale. Stored for out-of-sample scaling in woven_scores().
+    #  The transform is deterministic, so a precomp built with the same
+    #  scale value matches the graph woven() would build itself.
+    scale_center <- NULL
+    scale_scale <- NULL
+    if (isTRUE(scale)) {
+        .sf <- .scale_fit(X_list)
+        X_list <- .sf$X
+        scale_center <- .sf$center
+        scale_scale <- .sf$scale
+    }
+
+    #  Extract anchor Laplacian submatrices from precomp if supplied
+    La_list_precomp <- if (!is.null(precomp)) {
+        lapply(precomp, function(L) as.matrix(L[anchor_idx, anchor_idx, drop = FALSE]))
+    } else {
+        NULL
+    }
+
+    #  Fit: closed-form dual SUMCOR MCCA for all V
+    raw <- woven_mcca_dual(
+        X_list          = X_list,
+        anchor_idx      = anchor_idx,
+        Y               = Y,
+        K               = K,
+        lambdas         = lambdas,
+        gamma_y         = gamma_y,
+        k_nn            = k_nn,
+        ridge_w         = ridge_w,
+        screen_top      = screen_top,
+        La_list_precomp = La_list_precomp,
+        verbose         = verbose
+    )
+    .woven_assemble(
+        raw, X_list, Y, Y_labels, anchor_idx, lambdas, gamma_y,
+        k_nn, ridge_w, screen_top, scale, scale_center, scale_scale, verbose
+    )
+}
+
+# Input handling for woven(): convert a MultiAssayExperiment, validate the
+# modalities and labels, and settle the anchor set. Returns the list form of
+# the data with n, V, the (checked) anchor indices and the labels.
+.woven_check_input <- function(X_list, Y, anchor_idx, K, verbose) {
     #  MultiAssayExperiment input: convert to the internal X_list
     #  representation, then proceed exactly as with a plain list.
     if (methods::is(X_list, "MultiAssayExperiment")) {
@@ -341,51 +410,16 @@ woven <- function(X_list, Y, anchor_idx = NULL,
         stop(sprintf("Need at least K=%d anchor subjects; got %d.", K, length(anchor_idx)))
     }
 
-    Y_fct <- as.factor(Y)
-    Y_labels <- levels(Y_fct) # original label names e.g. "CN","MCI","Dementia"
-    Y <- as.integer(Y_fct)
+    list(X_list = X_list, Y = Y, anchor_idx = anchor_idx, V = V, n = n)
+}
 
-    if (length(lambdas) == 1L) lambdas <- rep(lambdas, V)
-    stopifnot(length(lambdas) == V)
-
-    if (!is.null(precomp)) {
-        k_nn <- .check_precomp(precomp, V, n, scale, k_nn)
-    }
-
-    #  Standardize features to unit variance so no modality dominates by
-    #  measurement scale. Stored for out-of-sample scaling in woven_scores().
-    #  The transform is deterministic, so a precomp built with the same
-    #  scale value matches the graph woven() would build itself.
-    scale_center <- NULL
-    scale_scale <- NULL
-    if (isTRUE(scale)) {
-        .sf <- .scale_fit(X_list)
-        X_list <- .sf$X
-        scale_center <- .sf$center
-        scale_scale <- .sf$scale
-    }
-
-    #  Extract anchor Laplacian submatrices from precomp if supplied
-    La_list_precomp <- if (!is.null(precomp)) {
-        lapply(precomp, function(L) as.matrix(L[anchor_idx, anchor_idx, drop = FALSE]))
-    } else {
-        NULL
-    }
-
-    #  Fit: closed-form dual SUMCOR MCCA for all V
-    raw <- woven_mcca_dual(
-        X_list          = X_list,
-        anchor_idx      = anchor_idx,
-        Y               = Y,
-        K               = K,
-        lambdas         = lambdas,
-        gamma_y         = gamma_y,
-        k_nn            = k_nn,
-        ridge_w         = ridge_w,
-        screen_top      = screen_top,
-        La_list_precomp = La_list_precomp,
-        verbose         = verbose
-    )
+# Build the S4 fit from the solver output: name the projection matrices,
+# score every subject from its observed modalities and fill the slots.
+.woven_assemble <- function(
+        raw, X_list, Y, Y_labels, anchor_idx, lambdas, gamma_y, k_nn, ridge_w,
+        screen_top, scale, scale_center, scale_scale, verbose) {
+    V <- length(X_list)
+    n <- nrow(X_list[[1L]])
     W_list <- raw$W_list
     Z_anchors <- raw$Za_list
     K <- raw$K
@@ -627,8 +661,8 @@ setMethod("show", "wovenSummary", function(object) {
 #' fit <- woven(list(X1, X2), Y = Y, anchor_idx = anchor_idx, K = K)
 #' plot(fit, labels = Y)
 #' @export
-setMethod("plot", signature(x = "woven", y = "missing"), function(x, y, labels = NULL,
-                                                                  dims = c(1L, 2L), highlight_anchors = TRUE, ...) {
+setMethod("plot", signature(x = "woven", y = "missing"), function(
+        x, y, labels = NULL, dims = c(1L, 2L), highlight_anchors = TRUE, ...) {
     .require_ggplot2()
     Z <- x@Z
     if (length(dims) != 2L || any(dims < 1L) || any(dims > x@K)) {
@@ -813,8 +847,8 @@ woven_scores <- function(fit, X_list_new) {
 #' pred <- woven_predict(fit, list(X1[1:5, ], X2[1:5, ]))
 #' pred$predicted_class
 #' @export
-woven_predict <- function(fit, X_list_new, method = c("centroid", "knn"),
-                          k_pred = 5L) {
+woven_predict <- function(
+        fit, X_list_new, method = c("centroid", "knn"), k_pred = 5L) {
     stopifnot(methods::is(fit, "woven"))
     method <- match.arg(method)
     Z_new <- woven_scores(fit, X_list_new)

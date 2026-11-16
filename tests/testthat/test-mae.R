@@ -1,5 +1,4 @@
 test_that("woven() accepts a MultiAssayExperiment and matches the equivalent list fit", {
-    skip_if_not_installed("MultiAssayExperiment")
     suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
 
     set.seed(1)
@@ -45,7 +44,6 @@ test_that("woven() accepts a MultiAssayExperiment and matches the equivalent lis
 })
 
 test_that(".mae_to_xlist() fills all-NA rows for subjects absent from an experiment", {
-    skip_if_not_installed("MultiAssayExperiment")
     suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
 
     exps <- ExperimentList(list(
@@ -67,7 +65,6 @@ test_that(".mae_to_xlist() fills all-NA rows for subjects absent from an experim
 })
 
 test_that(".mae_to_xlist() stops on replicate samples and names them", {
-    skip_if_not_installed("MultiAssayExperiment")
     suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
     A <- matrix(c(10, 11, 20, 21, 30, 31),
         nrow = 2,
@@ -91,7 +88,6 @@ test_that(".mae_to_xlist() stops on replicate samples and names them", {
 })
 
 test_that("woven() row names follow colData for a MultiAssayExperiment", {
-    skip_if_not_installed("MultiAssayExperiment")
     suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
     data(woven_example, package = "woven")
     ids <- sprintf("S%03d", 1:90)
@@ -111,7 +107,6 @@ test_that("woven() row names follow colData for a MultiAssayExperiment", {
 })
 
 test_that("woven_scores()/woven_predict() accept a MultiAssayExperiment", {
-    skip_if_not_installed("MultiAssayExperiment")
     suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
     data(woven_example, package = "woven")
     ids <- sprintf("S%03d", 1:90)
@@ -134,4 +129,44 @@ test_that("woven_scores()/woven_predict() accept a MultiAssayExperiment", {
     expect_identical(rownames(p), ids[61:90])
     only_rna <- suppressWarnings(suppressMessages(mae[, , "RNA"]))
     expect_error(woven_scores(fit, only_rna), "lacks experiment")
+})
+
+test_that("woven_precompute() accepts a MultiAssayExperiment and matches the list route", {
+    suppressWarnings(suppressPackageStartupMessages(library(MultiAssayExperiment)))
+    set.seed(3)
+    n <- 40
+    K <- 2L
+    Y <- rep(1:2, each = n / 2)
+    X1 <- matrix(rnorm(n * 8), n, 8)
+    X2 <- matrix(rnorm(n * 6), n, 6)
+    miss <- matrix(runif(n * 2) < 0.3, n, 2)
+    for (i in which(rowSums(miss) == 2)) miss[i, sample(2, 1)] <- FALSE
+    X1[miss[, 1], ] <- NA
+    X2[miss[, 2], ] <- NA
+    ids <- paste0("S", seq_len(n))
+    rownames(X1) <- ids
+    rownames(X2) <- ids
+    exps <- ExperimentList(list(
+        Mod1 = t(X1[!is.na(X1[, 1]), , drop = FALSE]),
+        Mod2 = t(X2[!is.na(X2[, 1]), , drop = FALSE])
+    ))
+    mae <- MultiAssayExperiment(exps,
+        colData = DataFrame(row.names = ids, group = Y)
+    )
+
+    pc_mae <- woven_precompute(mae)
+    pc_list <- woven_precompute(list(Mod1 = X1, Mod2 = X2))
+    expect_length(pc_mae, 2L)
+    expect_equal(names(pc_mae), c("Mod1", "Mod2"))
+    for (v in 1:2) {
+        expect_equal(as.matrix(pc_mae[[v]]), as.matrix(pc_list[[v]]),
+            ignore_attr = TRUE
+        )
+    }
+
+    fit_pc <- woven(mae, Y = "group", K = K, precomp = pc_mae, verbose = FALSE)
+    fit_nopc <- woven(mae, Y = "group", K = K, verbose = FALSE)
+    expect_equal(abs(latent_scores(fit_pc)), abs(latent_scores(fit_nopc)),
+        tolerance = 1e-8
+    )
 })

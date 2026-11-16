@@ -394,14 +394,9 @@ woven_nystrom_error <- function(fit, X_list, n_loo = NULL) {
 #'   set the seed before calling for reproducible values.
 #' @return named list of metric values
 #' @noRd
-woven_all_metrics <- function(Z, labels, n_total,
-                              Z_true = NULL,
-                              outcome = NULL,
-                              treatment = NULL,
-                              true_effects = NULL,
-                              fit = NULL,
-                              X_list = NULL,
-                              n_loo = NULL) {
+woven_all_metrics <- function(
+        Z, labels, n_total, Z_true = NULL, outcome = NULL, treatment = NULL,
+        true_effects = NULL, fit = NULL, X_list = NULL, n_loo = NULL) {
     stopifnot(nrow(Z) == length(labels))
 
     out <- list(

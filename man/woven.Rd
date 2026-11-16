@@ -81,8 +81,10 @@ built with the same \code{scale} value; a mismatch is an error.}
 
 \item{precomp}{optional output of [woven_precompute()] -- pre-built
 Laplacians for the same \code{X_list}. Pass this when calling
-\code{woven()} multiple times on the same data (e.g. hyperparameter
-search, cross-validation) to avoid rebuilding the graph each time.
+\code{woven()} multiple times on the same subjects (e.g. comparing
+hyperparameter settings) to avoid rebuilding the graph each time. Not
+usable for fits on a subset of subjects, such as cross-validation
+training folds.
 When supplied, \code{k_nn} is taken from \code{precomp}.}
 
 \item{verbose}{logical  -- print progress (default TRUE)}

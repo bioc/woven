@@ -1,6 +1,6 @@
 Package: woven
 Title: Weighted Omics View Embedding via Nystrom for Incomplete Multi-Omics Data
-Version: 0.99.4
+Version: 0.99.5
 Authors@R: c(
     person("Nathan", "Bresette",
            role = c("aut", "cre"),
@@ -38,22 +38,22 @@ biocViews: Software, StatisticalMethod, DimensionReduction,
     Classification, Clustering, GeneExpression, Transcriptomics,
     Proteomics, Metabolomics
 Depends:
-    R (>= 4.5.0)
+    R (>= 4.6.0)
 Imports:
     Matrix,
     MatrixGenerics,
+    MultiAssayExperiment,
     RANN,
     cluster,
     methods,
     stats,
+    SummarizedExperiment,
     utils
 Suggests:
     ggplot2,
     testthat (>= 3.0.0),
     knitr,
     rmarkdown,
-    BiocStyle,
-    MultiAssayExperiment,
-    SummarizedExperiment
+    BiocStyle
 VignetteBuilder: knitr
 Config/testthat/edition: 3
