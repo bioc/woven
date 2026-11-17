@@ -30,12 +30,15 @@ least one data type is dropped, and no missing block is imputed.
   are both shared across data types and class-discriminative.
 - Closed form: one eigendecomposition; no iterations or random restarts.
 - Interpretable: one linear projection matrix per data type.
-- Bioconductor input: takes a `MultiAssayExperiment` directly.
+- Bioconductor input: takes a `MultiAssayExperiment` directly, or separate
+  tables matched by subject ID.
+- Readable output: progress and a coverage summary while fitting, one
+  `plot()` entry point, and a top-features table.
 
 ## Installation
 
 ```r
-# Bioconductor (submission under review)
+# Bioconductor
 BiocManager::install("woven")
 
 # Development version
@@ -55,14 +58,25 @@ for (e in c("RNASeq2GeneNorm", "miRNASeqGene"))
     acc[[e]] <- log2(assay(acc[[e]]) + 1)
 
 fit <- woven(acc, Y = "C1A.C1B", K = 2L) # 78 tumours, 33 without RPPA
-fit
-plot(fit, labels = acc$C1A.C1B)
-head(latent_scores(fit)) # one row per colData subject
-woven_plot_vip(fit, modality = "RNASeq2GeneNorm")
+# or let cross-validation choose the settings, then use tune$fit:
+# tune <- woven_tune(acc, Y = "C1A.C1B", K = 2L); fit <- tune$fit
+plot(fit)                        # latent space, coloured by subtype
+plot(fit, type = "features")     # top features per data type
+plot(fit, type = "coverage")     # who has which data type
+woven_top_features(fit)          # the same ranking as a table
+head(latent_scores(fit))         # one row per subject
 ```
 
-A list of matrices (subjects in rows, an all-`NA` row for a missing block)
-works too; see `?woven_example`.
+Without a MultiAssayExperiment, pass one table per data type (matrices or
+data frames, subjects in rows). Tables with row names (subject IDs) may cover
+different subjects in any order; woven matches them and treats a subject
+absent from a table as missing that data type:
+
+```r
+fit <- woven(list(RNA = rna_table, Protein = protein_table),
+             Y = labels_named_by_subject_id)
+woven_predict(fit, list(RNA = new_rna)) # classify subjects with RNA only
+```
 
 ## Documentation
 
@@ -71,7 +85,7 @@ vignette("woven-intro", package = "woven")
 ```
 
 See `?woven` for the main entry point, and `?woven_scores`,
-`?woven_predict`, `?woven_metrics` and `?woven_plot_vip` for the
+`?woven_predict`, `?woven_top_features` and `?woven_metrics` for the
 supporting functions.
 
 ## Citation

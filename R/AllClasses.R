@@ -49,6 +49,15 @@
 #'   scales used for standardization, reapplied in \code{\link{woven_scores}}.
 #' @slot fit_mcca list, the raw output of \code{\link{woven_mcca_dual}} for
 #'   advanced/diagnostic use.
+#' @slot Y factor of length n, the class label of every subject (names are
+#'   the subject IDs when the data have row names). Used as the default
+#'   labels by \code{plot}, \code{summary} and \code{\link{woven_metrics}}.
+#' @slot observed logical matrix, n x V: \code{TRUE} where a subject has
+#'   data for a modality.
+#' @slot class_means list of V numeric matrices, each p_v x G: the mean of
+#'   each (standardized) feature in each class, over the subjects observed
+#'   in that modality. Used to colour features by the class in which they
+#'   are highest.
 #' @seealso [woven()] to fit a model; [woven-accessors] to read one.
 #' @exportClass woven
 setClass(
@@ -74,7 +83,10 @@ setClass(
         scaled = "logical",
         scale_center = "ANY",
         scale_scale = "ANY",
-        fit_mcca = "list"
+        fit_mcca = "list",
+        Y = "ANY",
+        observed = "matrix",
+        class_means = "list"
     )
 )
 

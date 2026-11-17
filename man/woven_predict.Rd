@@ -9,9 +9,9 @@ woven_predict(fit, X_list_new, method = c("centroid", "knn"), k_pred = 5L)
 \arguments{
 \item{fit}{woven object from [woven()]}
 
-\item{X_list_new}{new subjects, in either form accepted by
-[woven_scores()]: a list of V matrices (n_new x p_v) with all-NA rows
-for missing modality blocks, or a \code{MultiAssayExperiment}.}
+\item{X_list_new}{new subjects, in any form accepted by
+[woven_scores()] (for example \code{list(RNA = new_rna)} to classify
+subjects that have RNA only).}
 
 \item{method}{\code{"centroid"} (default): inverse-squared-distance
 weights to the class centroids of the anchor scores.

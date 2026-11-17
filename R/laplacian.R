@@ -12,9 +12,11 @@
 #'
 #' @param X numeric matrix, n x p.
 #' @param k integer, number of nearest neighbors (default 10)
-#' @param sigma numeric, RBF bandwidth. NULL = median heuristic over observed edges.
-#' @param kernel_matrix numeric matrix, n_obs x n_obs precomputed affinity (Gram)
-#'   matrix for the observed rows only. When provided, bypasses RBF k-NN entirely.
+#' @param sigma numeric, RBF bandwidth. NULL = median heuristic over observed
+#'   edges.
+#' @param kernel_matrix numeric matrix, n_obs x n_obs precomputed affinity
+#'   (Gram) matrix for the observed rows only. When provided, bypasses RBF
+#'   k-NN entirely.
 #'   Rows correspond to \code{X[!block_missing_rows, ]} in order. Lets an
 #'   externally computed kernel replace the default RBF graph.
 #' @return sparse n_full x n_full symmetric combinatorial Laplacian (dgCMatrix).

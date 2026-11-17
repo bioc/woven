@@ -2,38 +2,31 @@
 % Please edit documentation in R/plots.R
 \name{woven_plot_variance}
 \alias{woven_plot_variance}
-\title{Plot variance explained per WOVEN latent dimension}
+\title{Plot the strength of each WOVEN latent dimension}
 \usage{
-woven_plot_variance(fit, main = "Variance Explained")
+woven_plot_variance(fit, main = "Strength of each latent dimension")
 }
 \arguments{
 \item{fit}{woven object from [woven()]}
 
-\item{main}{character: plot title (default "Variance Explained")}
+\item{main}{character: plot title}
 }
 \value{
 a ggplot object (printed automatically; add layers with \code{+})
 }
 \description{
-Bar chart of the proportion of variance explained per latent dimension
-(proportional to squared singular values), overlaid with a cumulative
-variance curve on a secondary axis. Use this to choose K and to show
-how much shared multi-omics signal is captured in the leading dimensions.
+Bar chart of each latent dimension's share of the squared supervised
+canonical correlations (\code{singular_values(fit)^2}), with the
+cumulative share as a line. A dimension with a small share adds little
+shared, class-related signal, which helps when choosing \code{K}. The
+shares describe the cross-modal alignment, not the variance of the data.
 }
 \examples{
-set.seed(1)
-n <- 60
-p1 <- 30
-p2 <- 20
-K <- 4
-Y <- rep(1:2, each = n / 2)
-X1 <- matrix(rnorm(n * p1), n, p1)
-X2 <- matrix(rnorm(n * p2), n, p2)
-miss <- matrix(runif(n * 2) < 0.3, n, 2)
-for (i in which(rowSums(miss) == 2)) miss[i, sample(2, 1)] <- FALSE
-X1[miss[, 1], ] <- NA
-X2[miss[, 2], ] <- NA
-fit <- woven(list(X1, X2), Y = Y, K = K)
+data(woven_example)
+fit <- woven(woven_example$X_missing,
+    Y = woven_example$Y, K = 4L,
+    verbose = FALSE
+)
 woven_plot_variance(fit)
 }
 \seealso{

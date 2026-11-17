@@ -9,7 +9,8 @@
 \arguments{
 \item{object}{a woven object from [woven()]}
 
-\item{labels}{character, factor, or integer vector of length n.}
+\item{labels}{character, factor, or integer vector of length n.
+Defaults to the labels the model was fit with.}
 
 \item{...}{unused}
 }
@@ -18,10 +19,11 @@ Invisibly returns a named numeric vector of metrics.
 }
 \description{
 Prints a compact metrics table: silhouette, Davies-Bouldin, NMI, and ESS
-for the scored subjects.  Requires class labels.
+for the scored subjects, using the class labels stored in the fit unless
+\code{labels} is given.
 }
 \examples{
 data(woven_example)
 fit <- woven(woven_example$X_complete, Y = woven_example$Y, K = 3L)
-summary(fit, labels = woven_example$Y)
+summary(fit)
 }

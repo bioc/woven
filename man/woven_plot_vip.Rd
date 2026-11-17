@@ -2,26 +2,32 @@
 % Please edit documentation in R/plots.R
 \name{woven_plot_vip}
 \alias{woven_plot_vip}
-\title{Plot VIP scores for a WOVEN modality}
+\title{Plot the top features of a WOVEN fit by VIP score}
 \usage{
 woven_plot_vip(
   fit,
-  modality = 1L,
-  n_top = 20L,
+  modality = NULL,
+  n_top = 15L,
   feature_names = NULL,
+  color_by = c("class", "modality"),
   main = NULL
 )
 }
 \arguments{
 \item{fit}{woven object from [woven()]}
 
-\item{modality}{integer index (1..V) or name of the modality to plot
-(default 1)}
+\item{modality}{\code{NULL} (default) for every modality, or one or more
+modality names or indices (1..V).}
 
-\item{n_top}{integer: number of top features to display (default 20)}
+\item{n_top}{integer: number of top features per modality (default 15)}
 
-\item{feature_names}{optional character vector of length p_v with feature
-labels. If NULL, uses rownames of W_list[[modality]] or "Feature_j".}
+\item{feature_names}{optional character vector of feature labels, one per
+feature; only with a single \code{modality}. If NULL, uses the feature
+(column) names of the data.}
+
+\item{color_by}{\code{"class"} (default): colour each bar by the class
+with the highest mean for that feature. \code{"modality"}: one colour
+per modality.}
 
 \item{main}{character: plot title. If NULL, a default is generated.}
 }
@@ -29,28 +35,26 @@ labels. If NULL, uses rownames of W_list[[modality]] or "Feature_j".}
 a ggplot object (printed automatically; add layers with \code{+})
 }
 \description{
-Displays the top features by Variable Importance in Projection (VIP) score
-for one modality. VIP scores weight each feature's loading across all K
-latent dimensions by the variance explained per dimension, producing a
-single importance ranking analogous to DIABLO's contribution plot.
-A dashed reference line at VIP = 1 marks above-average importance.
+Bar chart of the features with the highest Variable Importance in
+Projection (VIP) in each modality, one panel per modality. VIP combines
+a feature's loadings over all K latent dimensions, weighted by each
+dimension's share of the squared singular values (see
+[woven_top_features()] for the same ranking as a table). By default each
+bar is coloured by the class in which that feature has its highest mean,
+as in DIABLO's \code{plotLoadings(contrib = "max")}, so the plot shows
+both which features matter and which class they mark. A dashed line at
+VIP = 1 marks above-average importance.
 }
 \examples{
-set.seed(1)
-n <- 60
-p1 <- 30
-p2 <- 20
-K <- 3
-Y <- rep(1:3, each = n / 3)
-X1 <- matrix(rnorm(n * p1), n, p1)
-X2 <- matrix(rnorm(n * p2), n, p2)
-miss <- matrix(runif(n * 2) < 0.3, n, 2)
-for (i in which(rowSums(miss) == 2)) miss[i, sample(2, 1)] <- FALSE
-X1[miss[, 1], ] <- NA
-X2[miss[, 2], ] <- NA
-fit <- woven(list(X1, X2), Y = Y, K = K)
-woven_plot_vip(fit, modality = 1L)
+data(woven_example)
+fit <- woven(woven_example$X_missing,
+    Y = woven_example$Y, K = 3L,
+    verbose = FALSE
+)
+woven_plot_vip(fit)
+woven_plot_vip(fit, modality = "RNA", n_top = 10)
 }
 \seealso{
-[woven_plot_loadings()], [woven_plot_variance()]
+[woven_top_features()], [woven_plot_loadings()],
+  [woven_plot_variance()]
 }

@@ -63,11 +63,11 @@ test_that("woven_precompute() reused across two different anchor sets/fits", {
     expect_false(isTRUE(all.equal(latent_scores(fit_full), latent_scores(fit_half))))
 })
 
-test_that("summary() with no labels prints without error and returns NULL invisibly", {
+test_that("summary() with no labels uses the labels stored in the fit", {
     d <- make_fixture2()
     fit <- woven(list(d$X1, d$X2), Y = d$groups, anchor_idx = d$anchor_idx, K = d$K, verbose = FALSE)
-    expect_output(res <- summary(fit), "Pass labels = Y")
-    expect_null(res)
+    expect_output(res <- summary(fit), "Silhouette")
+    expect_equal(res, woven_metrics(fit, d$groups))
 })
 
 test_that("summary() with labels returns an invisible named metrics vector", {

@@ -47,7 +47,7 @@ test_that("unnamed inputs report subject indices instead of names", {
     err <- expect_error(
         woven(X, Y = d$Y, anchor_idx = 1:20, K = 2L, verbose = FALSE)
     )
-    expect_match(conditionMessage(err), "modality 1: 1, 2")
+    expect_match(conditionMessage(err), "Modality 1: 1, 2")
 })
 
 test_that("a valid user-supplied anchor_idx equals automatic detection", {
@@ -130,8 +130,11 @@ test_that("other argument errors are informative", {
     d <- val_fixture()
     expect_error(woven(d$X$RNA, Y = d$Y), "list of matrices")
     expect_error(woven(d$X[1], Y = d$Y), "at least 2 modalities")
-    expect_error(woven(list(d$X$RNA, as.data.frame(d$X$Prot)), Y = d$Y), "not a matrix")
-    expect_error(woven(list(d$X$RNA, d$X$Prot[1:30, ]), Y = d$Y), "same number of rows")
+    expect_error(woven(list(d$X$RNA, "a"), Y = d$Y), "not a matrix or data frame")
+    expect_error(
+        woven(list(unname(d$X$RNA), unname(d$X$Prot)[1:30, ]), Y = d$Y),
+        "same number of rows"
+    )
     expect_error(woven(d$X, Y = d$Y[-1]), "length\\(Y\\)")
     expect_error(woven(d$X, Y = replace(d$Y, 5, NA)), "NA values")
     expect_error(woven(d$X, Y = d$Y, K = 0L), "K must be >= 1")
@@ -170,7 +173,7 @@ test_that("woven() is deterministic, and seeded metrics are reproducible", {
 test_that("verbose mode reports anchors and scoring", {
     d <- val_fixture()
     expect_message(
-        woven(d$X, Y = d$Y, K = 2L),
-        "Auto-detected 37 anchor subjects"
+        woven(d$X, Y = d$Y, K = 2L, plot = FALSE),
+        "Anchors \\(observed in every modality\\): 37 of 40"
     )
 })

@@ -16,20 +16,32 @@ woven(
   screen_top = Inf,
   scale = TRUE,
   precomp = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  plot = interactive()
 )
 }
 \arguments{
-\item{X_list}{either a named list of V numeric matrices, each n x p_v,
-with subjects missing an entire modality having that matrix row set to
-NA, or a \code{MultiAssayExperiment}. When a MultiAssayExperiment is
+\item{X_list}{the data, one block per modality (subjects in rows,
+features in columns), as either
+\itemize{
+  \item a named list of numeric matrices or data frames. When every
+    block has row names (subject IDs), the blocks may cover different
+    subjects in any order: woven matches them by ID and treats a
+    subject absent from a block as missing that modality. Without row
+    names, all blocks must have the same rows in the same order, with a
+    subject missing a modality given an all-NA row; or
+  \item a \code{MultiAssayExperiment}.
+} When a MultiAssayExperiment is
 supplied, each experiment becomes one modality, subjects are aligned to
 \code{colData(X_list)} via \code{sampleMap(X_list)}, and a subject not
 present in a given experiment gets an all-NA row for it automatically.}
 
-\item{Y}{integer or factor vector of length n  -- class labels for all
-subjects, in the same subject order as \code{X_list} (or as
-\code{colData(X_list)} when \code{X_list} is a MultiAssayExperiment).
+\item{Y}{class labels for all subjects (factor, character or integer).
+Plots and tables list the classes in the order of
+\code{levels(as.factor(Y))}; pass a factor to choose the order.
+Either in subject order (the row order of the blocks, or of
+\code{colData(X_list)} for a MultiAssayExperiment) or a named vector
+whose names are the subject IDs, in which case order does not matter.
 A single string is instead treated as the name of a \code{colData}
 column to use as labels, but only when \code{X_list} is a
 MultiAssayExperiment. Only anchor subjects' labels enter the supervised
@@ -60,9 +72,9 @@ Tune via cross-validation on anchor set if labels are noisy.}
 Gram matrix during projection-matrix (W) recovery (default 1e-8, a purely
 numerical-stability nudge with no regularizing effect). Increase (e.g.
 0.1-5.0) to control capacity when p_v >> n_a and the true signal is
-diffuse across many features -- select via cross-validation on held-out
-classification error, since silhouette is insensitive to this parameter
-even where it materially changes classification accuracy.}
+diffuse across many features -- select it with [woven_tune()] (held-out
+classification error); silhouette is insensitive to this parameter even
+where it materially changes classification accuracy.}
 
 \item{screen_top}{integer or Inf  -- restricts W recovery to the top
 \code{screen_top} features per modality by ANOVA F-statistic against Y,
@@ -72,9 +84,10 @@ truncation. Complementary to \code{ridge_w}; both target overfitting when
 p_v is large relative to n_a. Select jointly with \code{ridge_w} via
 cross-validation, not independently (the two interact).}
 
-\item{scale}{logical  -- standardize each modality's features to zero mean and
-unit variance before fitting (default TRUE), so no modality dominates by
-measurement scale. Apply biological transforms (CLR/log/VST) upstream.
+\item{scale}{logical  -- standardize each modality's features to zero mean
+and unit variance before fitting (default TRUE), so no modality
+dominates by measurement scale. Apply biological transforms
+(CLR/log/VST) upstream.
 The center and scale are stored and reapplied to new subjects in
 [woven_scores()]. When \code{precomp} is supplied it must have been
 built with the same \code{scale} value; a mismatch is an error.}
@@ -87,13 +100,19 @@ usable for fits on a subset of subjects, such as cross-validation
 training folds.
 When supplied, \code{k_nn} is taken from \code{precomp}.}
 
-\item{verbose}{logical  -- print progress (default TRUE)}
+\item{verbose}{logical  -- report progress (default TRUE): a summary of
+the input, one line per step with timings, and a closing summary of
+coverage and top features. All output is via \code{message()}.}
+
+\item{plot}{logical  -- draw the latent space when the fit finishes
+(default: in interactive sessions only). Needs ggplot2.}
 }
 \value{
 an object of S4 class \code{\linkS4class{woven}}. Key slots:
   \describe{
     \item{Z}{n x K matrix of consensus latent scores for ALL n subjects
-      (anchors and block-missing). The primary output for downstream analysis.}
+      (anchors and block-missing). The primary output for downstream
+      analysis.}
     \item{W_list}{list of V projection matrices, each p_v x K}
     \item{Z_anchors}{list of V anchor latent score matrices, each n_a x K}
     \item{singular_values}{K supervised canonical correlations}
@@ -136,24 +155,30 @@ X2[miss[, 2], ] <- NA
 fit <- woven(list(X1, X2), Y = Y, K = K)
 dim(latent_scores(fit)) # 60 x 2 -- all subjects scored
 
+# Most often each assay is its own table covering its own subjects.
+# Give the tables row names (subject IDs) and woven matches them:
+ids <- paste0("S", seq_len(n))
+rna <- matrix(rnorm(50 * p1), 50, p1, dimnames = list(ids[1:50], NULL))
+prot <- matrix(rnorm(45 * p2), 45, p2, dimnames = list(ids[16:60], NULL))
+labels <- setNames(Y, ids)
+fit_tab <- woven(list(RNA = rna, Protein = prot), Y = labels, K = K)
+
 # Equivalently, from a MultiAssayExperiment: each experiment is one
 # modality, and subjects missing an experiment need no special handling.
-if (requireNamespace("MultiAssayExperiment", quietly = TRUE)) {
-    library(MultiAssayExperiment)
-    ids <- paste0("S", seq_len(n))
-    rownames(X1) <- ids
-    rownames(X2) <- ids
-    present1 <- ids[!is.na(X1[, 1])]
-    present2 <- ids[!is.na(X2[, 1])]
-    exps <- ExperimentList(list(
-        Mod1 = t(X1[present1, , drop = FALSE]),
-        Mod2 = t(X2[present2, , drop = FALSE])
-    ))
-    cd <- DataFrame(row.names = ids, group = Y)
-    mae <- MultiAssayExperiment(exps, colData = cd)
-    fit_mae <- woven(mae, Y = "group", K = K)
-    dim(latent_scores(fit_mae)) # same 60 x 2 -- all subjects scored
-}
+library(MultiAssayExperiment)
+ids <- paste0("S", seq_len(n))
+rownames(X1) <- ids
+rownames(X2) <- ids
+present1 <- ids[!is.na(X1[, 1])]
+present2 <- ids[!is.na(X2[, 1])]
+exps <- ExperimentList(list(
+    Mod1 = t(X1[present1, , drop = FALSE]),
+    Mod2 = t(X2[present2, , drop = FALSE])
+))
+cd <- DataFrame(row.names = ids, group = Y)
+mae <- MultiAssayExperiment(exps, colData = cd)
+fit_mae <- woven(mae, Y = "group", K = K)
+dim(latent_scores(fit_mae)) # same 60 x 2 -- all subjects scored
 
 }
 \seealso{

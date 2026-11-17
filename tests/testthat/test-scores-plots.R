@@ -49,7 +49,8 @@ test_that("a subject's score from one modality is that modality's projection", {
 test_that("woven_scores() rejects mismatched inputs", {
     fit <- sp_fit()
     Xn <- lapply(woven_example$X_missing, function(X) X[1:3, ])
-    expect_error(woven_scores(fit, Xn[1:2]), "list of 3 matrices")
+    expect_error(woven_scores(fit, unname(Xn[1:2])), "list of 3 matrices")
+    expect_error(woven_scores(fit, list(Lipids = Xn$RNA)), "Unknown modality")
     Xn$Proteomics <- Xn$Proteomics[, 1:5]
     expect_error(woven_scores(fit, Xn), "Proteomics\\) has 5 features")
 })
@@ -101,8 +102,12 @@ test_that("woven_plot_*() error on a bad dim or modality", {
     fit <- sp_fit()
     expect_error(woven_plot_vip(fit, modality = 4L), "integer in 1..3")
     expect_error(woven_plot_vip(fit, modality = "Lipids"), "Modality 'Lipids' not found")
-    expect_error(woven_plot_vip(fit, modality = 1:2), "single modality")
-    expect_error(woven_plot_vip(fit, feature_names = letters[1:3]), "feature_names length")
+    expect_error(woven_plot_vip(fit, modality = NA), "single modality")
+    expect_error(woven_plot_vip(fit, feature_names = letters[1:3]), "single modality")
+    expect_error(
+        woven_plot_vip(fit, modality = 1L, feature_names = letters[1:3]),
+        "feature_names length"
+    )
     expect_error(woven_plot_loadings(fit, dim = 4L), "dim must be a single integer in 1..3")
     expect_error(woven_plot_loadings(fit, dim = 0L), "dim must be")
     expect_error(woven_plot_loadings(fit, modality = "Lipids"), "not found")

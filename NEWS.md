@@ -1,3 +1,70 @@
+# woven 0.99.6
+
+## New features
+
+* New `woven_tune()`: chooses `gamma_y`, `ridge_w`, `screen_top` (and
+  optionally `lambdas`) by the held-out balanced error rate of
+  class-stratified cross-validation over the anchors, refitting
+  standardization, graphs and projections in every fold, then refits all
+  subjects with the best setting. Within a fold the eigendecomposition is
+  solved once per (`gamma_y`, `lambda`) and reused for every (`ridge_w`,
+  `screen_top`), giving the same predictions as refitting `woven()` for
+  each setting at a fraction of the cost. Returns a `wovenTune` object
+  (`tune$best`, `tune$results`, `tune$fit`; `plot(tune)` shows the error
+  over the grid).
+* `woven()` accepts one table per modality covering different subjects:
+  when every table has row names (subject IDs), woven matches them and
+  treats a subject absent from a table as missing that modality. Tables may
+  be data frames, and `Y` may be a vector named by subject ID.
+* `woven()` reports progress: a summary of the input (features and subjects
+  per modality, anchors), one line per step with timings, and a closing
+  summary of coverage against a complete-case analysis and the top features
+  per modality. `plot = TRUE` (the default in interactive sessions) draws
+  the latent space when the fit finishes.
+* The fit stores the class labels, so `plot(fit)`, `summary(fit)` and
+  `woven_metrics(fit)` no longer need them passed again.
+* `plot(fit, type = )` is one entry point for every plot: `"scores"`
+  (default), `"features"`, `"loadings"`, `"coverage"` and `"variance"`.
+* New `woven_plot_coverage()`: subjects by their pattern of observed
+  modalities, split by class, against what a complete-case analysis keeps.
+* New `woven_top_features()`: the top features per modality as a table,
+  with each feature's VIP and the class in which it is highest.
+* `woven_plot_vip()` now shows every modality by default (one panel each)
+  and colours each feature by the class in which it is highest
+  (`color_by = "modality"` for the previous single colour).
+* `woven_scores()` and `woven_predict()` accept new data in the same forms:
+  data frames, tables matched by row name, and named lists that leave out
+  modalities (scored without them).
+
+## Changes
+
+* VIP scores normalize each dimension's loading vector to unit length, as
+  in PLS, so the mean squared VIP is 1 within a modality and VIP = 1 marks
+  the average feature. Rankings can differ slightly from 0.99.5.
+* Features without column names are named `<modality>_<j>`; unnamed
+  modalities are named `Modality 1`, `Modality 2`, ...
+* Plots adapt to the data: point size and transparency scale with the
+  number of subjects; more than 8 classes get a non-repeating palette;
+  ellipses are drawn only for classes with at least 5 anchors; a fit with
+  `K = 1` is drawn as the distribution of dimension 1 per class; numeric
+  labels with many values (e.g. age) are drawn as a gradient; long feature
+  names are shortened; features removed by `screen_top` are left out; the
+  coverage plot combines rare patterns of modalities (`max_patterns`).
+* In the latent-space plot, subjects scored from a subset of modalities are
+  drawn as open points.
+* `woven_plot_loadings()` gives each modality its own scale and keeps the
+  modality order. `woven_plot_variance()` is relabelled as the share of the
+  squared canonical correlations (it is not variance explained) and drops
+  the second axis.
+* Fits are numerically unchanged.
+
+## Minor
+
+* The `woven()` MultiAssayExperiment example no longer wraps itself in a
+  `requireNamespace()` check, since MultiAssayExperiment is in Imports.
+* Source and roxygen lines wrapped to 80 characters. No change in results
+  or error messages.
+
 # woven 0.99.5
 
 * `Depends: R (>= 4.6.0)`, matching the R version the package is built and

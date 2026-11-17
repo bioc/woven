@@ -1,11 +1,12 @@
 # metrics.R  -- evaluation metrics for WOVEN and other latent embeddings
 #
-# All functions take a latent matrix Z (n x K) and return a scalar or named vector.
+# All functions take a latent matrix Z (n x K) and return a scalar or named
+# vector.
 # Designed to work on: WOVEN output, DIABLO variate scores, MOFA+ factor scores.
 #
 # Metrics:
 #   woven_silhouette       -- average silhouette width (cluster geometry)
-#   woven_davies_bouldin   -- Davies-Bouldin index (cluster compactness/separation)
+#   woven_davies_bouldin   -- Davies-Bouldin index (compactness/separation)
 #   woven_nmi              -- normalized mutual information (label recovery)
 #   woven_rv               -- RV coefficient vs ground-truth factor matrix
 #   woven_ess_retention    -- effective sample size retention (N_used / N_total)
@@ -257,7 +258,9 @@ woven_effect_bias <- function(Z, outcome, treatment, labels, true_effects) {
             return(NA_real_)
         }
 
-        df <- data.frame(y = outcome[idx], trt = treatment[idx], Z[idx, , drop = FALSE])
+        df <- data.frame(
+            y = outcome[idx], trt = treatment[idx], Z[idx, , drop = FALSE]
+        )
         fit <- tryCatch(stats::lm(y ~ ., data = df), error = function(e) NULL)
         if (is.null(fit)) {
             return(NA_real_)
@@ -381,7 +384,8 @@ woven_nystrom_error <- function(fit, X_list, n_loo = NULL) {
 #' @param Z numeric matrix n x K (consensus latent scores)
 #' @param labels integer or factor of length n
 #' @param n_total integer, total subjects before any filtering (for ESS)
-#' @param Z_true optional numeric matrix n x K_true (ground-truth factors for RV)
+#' @param Z_true optional numeric matrix n x K_true (ground-truth factors for
+#'   RV)
 #' @param outcome optional numeric vector (for effect bias)
 #' @param treatment optional 0/1 vector (for effect bias)
 #' @param true_effects optional named numeric (for effect bias)
@@ -415,7 +419,9 @@ woven_all_metrics <- function(
     }
 
     if (!is.null(outcome) && !is.null(treatment) && !is.null(true_effects)) {
-        out$effect_bias <- woven_effect_bias(Z, outcome, treatment, labels, true_effects)
+        out$effect_bias <- woven_effect_bias(
+            Z, outcome, treatment, labels, true_effects
+        )
     }
 
     if (!is.null(fit) && !is.null(X_list)) {
@@ -434,7 +440,7 @@ woven_all_metrics <- function(
 #'
 #' @param fit woven object from [woven()]
 #' @param labels integer, factor, or character vector of length n with subgroup
-#'   labels for all subjects (same Y passed to [woven()])
+#'   labels for all subjects. Defaults to the labels the model was fit with.
 #' @return named numeric vector with elements \code{Silhouette},
 #'   \code{Davies-Bouldin}, \code{NMI} and \code{ESS}
 #' @examples
@@ -450,12 +456,13 @@ woven_all_metrics <- function(
 #' X2[miss[, 2], ] <- NA
 #' fit <- woven(list(X1, X2), Y = Y, K = K)
 #' set.seed(1) # NMI uses k-means
-#' woven_metrics(fit, Y)
+#' woven_metrics(fit)
 #' @seealso [woven_silhouette()], [woven_davies_bouldin()], [woven_nmi()],
 #'   [woven_ess_retention()]
 #' @export
-woven_metrics <- function(fit, labels) {
+woven_metrics <- function(fit, labels = NULL) {
     stopifnot(methods::is(fit, "woven"))
+    if (is.null(labels)) labels <- fit@Y
     stopifnot(length(labels) == fit@n)
 
     scored <- !is.na(fit@Z[, 1L])
@@ -465,7 +472,9 @@ woven_metrics <- function(fit, labels) {
         n_total = fit@n
     )
 
-    out <- unlist(res[c("silhouette", "davies_bouldin", "nmi", "ess_retention")])
+    out <- unlist(
+        res[c("silhouette", "davies_bouldin", "nmi", "ess_retention")]
+    )
     names(out) <- c("Silhouette", "Davies-Bouldin", "NMI", "ESS")
     out
 }

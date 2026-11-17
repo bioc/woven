@@ -2,50 +2,63 @@
 % Please edit documentation in R/woven.R
 \name{plot,woven,missing-method}
 \alias{plot,woven,missing-method}
-\title{Plot the WOVEN latent space}
+\title{Plot a WOVEN fit}
 \usage{
-\S4method{plot}{woven,missing}(x, y, labels = NULL, dims = c(1L, 2L), highlight_anchors = TRUE, ...)
+\S4method{plot}{woven,missing}(
+  x,
+  y,
+  type = c("scores", "features", "loadings", "coverage", "variance"),
+  labels = NULL,
+  dims = c(1L, 2L),
+  highlight_anchors = TRUE,
+  ...
+)
 }
 \arguments{
 \item{x}{a woven object from [woven()]}
 
 \item{y}{unused; present for S4 `plot` signature compatibility}
 
-\item{labels}{integer or factor of length n for coloring points.
-If NULL, all points are plotted in a single color.}
+\item{type}{which plot: \code{"scores"} (default, the latent space),
+\code{"features"} (top features per modality, [woven_plot_vip()]),
+\code{"loadings"} ([woven_plot_loadings()]), \code{"coverage"} (which
+subjects have which modalities, [woven_plot_coverage()]), or
+\code{"variance"} ([woven_plot_variance()]).}
 
-\item{dims}{integer vector of length 2: which latent dimensions to plot
-(default c(1, 2))}
+\item{labels}{for \code{type = "scores"}: a vector of length n to colour
+points by. Defaults to the class labels used to fit the model. A
+numeric vector with more than 10 distinct values (for example age) is
+drawn as a colour gradient.}
 
-\item{highlight_anchors}{logical: distinguish anchors from projected subjects
-via point shape (default TRUE)}
+\item{dims}{for \code{type = "scores"}: integer vector of length 2, the
+latent dimensions to plot (default \code{c(1, 2)}). A fit with
+\code{K = 1} is drawn as the distribution of dimension 1 per class.}
 
-\item{...}{unused}
+\item{highlight_anchors}{for \code{type = "scores"}: logical, draw
+anchors filled and other subjects open (default TRUE)}
+
+\item{...}{passed to the \code{woven_plot_*()} function for the other
+types, e.g. \code{n_top} or \code{modality}.}
 }
 \value{
 a ggplot object, printed automatically when called at the top
-  level (standard R plot-method behavior).
+  level (standard R plot-method behaviour).
 }
 \description{
-Plots two latent dimensions from \code{latent_scores(fit)}, colored by group
-label. Anchor subjects (complete cases used to learn W) are shown as filled
-circles; block-missing subjects projected via available views are shown as
-open triangles. Returns a ggplot object that can be further customized with
-\code{+} layers.
+One entry point for every WOVEN plot. The default draws the latent space:
+two latent dimensions with subjects coloured by class (the labels stored
+in the fit, unless \code{labels} is given), anchors (subjects observed in
+every modality, used to learn the projections) as filled points, and
+subjects scored from a subset of modalities as open points. The other
+types call the matching \code{woven_plot_*()} function.
 }
 \examples{
-set.seed(1)
-n <- 20
-K <- 2L
-X1 <- matrix(rnorm(n * 5), n, 5)
-X2 <- matrix(rnorm(n * 4), n, 4)
-Y <- rep(1:2, each = n / 2)
-miss <- matrix(FALSE, n, 2)
-miss[c(15, 17, 19), 1] <- TRUE
-miss[c(16, 18, 20), 2] <- TRUE
-X1[miss[, 1], ] <- NA
-X2[miss[, 2], ] <- NA
-anchor_idx <- which(rowSums(miss) == 0)
-fit <- woven(list(X1, X2), Y = Y, anchor_idx = anchor_idx, K = K)
-plot(fit, labels = Y)
+data(woven_example)
+fit <- woven(woven_example$X_missing,
+    Y = woven_example$Y, K = 3L,
+    verbose = FALSE
+)
+plot(fit)
+plot(fit, type = "features", n_top = 8)
+plot(fit, type = "coverage")
 }

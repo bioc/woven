@@ -1,17 +1,19 @@
 # plots.R -- ggplot2-based publication-ready plots for WOVEN fits
 # ggplot2 is in Suggests: every plotting function calls .require_ggplot2().
 #
-# woven_plot_vip()      -- VIP scores per modality (lollipop chart)
+# woven_plot_vip()      -- top features per modality by VIP, coloured by class
+# woven_plot_coverage() -- which subjects have which modalities, by class
 # woven_plot_loadings() -- Feature loadings for one latent dimension
-# woven_plot_variance() -- Variance explained per dimension (bar + cumulative)
+# woven_plot_variance() -- share of squared canonical correlation per dimension
 
 # Suppress R CMD check notes for ggplot2 aesthetic variable names
 utils::globalVariables(c(
     "feature", "vip_score",
     "loading", "sign_str", "modality_label",
     "dim_int", "pct_var", "cumulative",
-    "z1", "z2", "group", "point_type",
-    "abs_loading"
+    "z1", "z2", "group", "point_type", "anchor", "shape",
+    "abs_loading", "key", "highest_in", "pattern", "Freq", "n", "ber", "ridge",
+    "gamma", "ink"
 ))
 
 .require_ggplot2 <- function() {
@@ -68,131 +70,291 @@ utils::globalVariables(c(
     "#CC79A7", "#56B4E9", "#F0E442", "#999999"
 )
 
+# n colours: the colour-blind-safe palette for up to 8 classes, an evenly
+# spaced HCL palette beyond that (so colours never repeat).
+.pal_n <- function(n) {
+    if (n <= length(.pal_woven)) .pal_woven[seq_len(n)] else
+        grDevices::hcl.colors(n, "Dark 3")
+}
+
+# Axis labels: drop the "<panel>___" key prefix used to keep identically
+# named features in different panels apart, and shorten very long names.
+.axis_labels <- function(width = 32L) {
+    function(x) {
+        x <- sub("^[0-9]+___", "", x)
+        long <- nchar(x) > width
+        x[long] <- paste0(substr(x[long], 1L, width - 3L), "...")
+        x
+    }
+}
+
 # Shared minimal theme for all WOVEN plots
 .theme_woven <- function(base_size = 12) {
     ggplot2::theme_bw(base_size = base_size) +
         ggplot2::theme(
-            plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = base_size + 1),
-            plot.subtitle    = ggplot2::element_text(hjust = 0.5, color = "gray40", size = base_size - 1),
+            plot.title = ggplot2::element_text(
+                face = "bold", hjust = 0.5, size = base_size + 1
+            ),
+            plot.subtitle = ggplot2::element_text(
+                hjust = 0.5, color = "gray40", size = base_size - 1
+            ),
             panel.grid.minor = ggplot2::element_blank(),
-            strip.background = ggplot2::element_rect(fill = "gray95", color = "gray80"),
+            strip.background = ggplot2::element_rect(
+                fill = "gray95", color = "gray80"
+            ),
             strip.text       = ggplot2::element_text(face = "bold")
         )
 }
 
-#' Plot VIP scores for a WOVEN modality
+#' Plot the top features of a WOVEN fit by VIP score
 #'
-#' Displays the top features by Variable Importance in Projection (VIP) score
-#' for one modality. VIP scores weight each feature's loading across all K
-#' latent dimensions by the variance explained per dimension, producing a
-#' single importance ranking analogous to DIABLO's contribution plot.
-#' A dashed reference line at VIP = 1 marks above-average importance.
+#' Bar chart of the features with the highest Variable Importance in
+#' Projection (VIP) in each modality, one panel per modality. VIP combines
+#' a feature's loadings over all K latent dimensions, weighted by each
+#' dimension's share of the squared singular values (see
+#' [woven_top_features()] for the same ranking as a table). By default each
+#' bar is coloured by the class in which that feature has its highest mean,
+#' as in DIABLO's \code{plotLoadings(contrib = "max")}, so the plot shows
+#' both which features matter and which class they mark. A dashed line at
+#' VIP = 1 marks above-average importance.
 #'
 #' @param fit woven object from [woven()]
-#' @param modality integer index (1..V) or name of the modality to plot
-#'   (default 1)
-#' @param n_top integer: number of top features to display (default 20)
-#' @param feature_names optional character vector of length p_v with feature
-#'   labels. If NULL, uses rownames of W_list[[modality]] or "Feature_j".
+#' @param modality \code{NULL} (default) for every modality, or one or more
+#'   modality names or indices (1..V).
+#' @param n_top integer: number of top features per modality (default 15)
+#' @param feature_names optional character vector of feature labels, one per
+#'   feature; only with a single \code{modality}. If NULL, uses the feature
+#'   (column) names of the data.
+#' @param color_by \code{"class"} (default): colour each bar by the class
+#'   with the highest mean for that feature. \code{"modality"}: one colour
+#'   per modality.
 #' @param main character: plot title. If NULL, a default is generated.
 #' @return a ggplot object (printed automatically; add layers with \code{+})
 #' @examples
-#' set.seed(1)
-#' n <- 60
-#' p1 <- 30
-#' p2 <- 20
-#' K <- 3
-#' Y <- rep(1:3, each = n / 3)
-#' X1 <- matrix(rnorm(n * p1), n, p1)
-#' X2 <- matrix(rnorm(n * p2), n, p2)
-#' miss <- matrix(runif(n * 2) < 0.3, n, 2)
-#' for (i in which(rowSums(miss) == 2)) miss[i, sample(2, 1)] <- FALSE
-#' X1[miss[, 1], ] <- NA
-#' X2[miss[, 2], ] <- NA
-#' fit <- woven(list(X1, X2), Y = Y, K = K)
-#' woven_plot_vip(fit, modality = 1L)
-#' @seealso [woven_plot_loadings()], [woven_plot_variance()]
+#' data(woven_example)
+#' fit <- woven(woven_example$X_missing,
+#'     Y = woven_example$Y, K = 3L,
+#'     verbose = FALSE
+#' )
+#' woven_plot_vip(fit)
+#' woven_plot_vip(fit, modality = "RNA", n_top = 10)
+#' @seealso [woven_top_features()], [woven_plot_loadings()],
+#'   [woven_plot_variance()]
 #' @export
 woven_plot_vip <- function(
-        fit, modality = 1L, n_top = 20L, feature_names = NULL, main = NULL) {
+        fit, modality = NULL, n_top = 15L, feature_names = NULL,
+        color_by = c("class", "modality"), main = NULL) {
     .require_ggplot2()
     stopifnot(methods::is(fit, "woven"))
-    modality <- .resolve_modality(modality, fit)
+    color_by <- match.arg(color_by)
+    mods <- if (is.null(modality)) {
+        seq_len(fit@V)
+    } else {
+        vapply(modality, .resolve_modality, integer(1L), fit = fit)
+    }
+    if (!is.null(feature_names) && length(mods) != 1L) {
+        stop("feature_names can only be given with a single modality.",
+            call. = FALSE
+        )
+    }
 
-    W <- fit@W_list[[modality]]
-    p <- nrow(W)
-    svals <- fit@singular_values
-    wts <- svals^2 / sum(svals^2)
-    vip <- sqrt(p * rowSums(sweep(W^2, 2L, wts, "*")))
-
-    if (is.null(feature_names)) {
-        feature_names <- if (!is.null(rownames(W))) {
-            rownames(W)
-        } else {
-            paste0("Feature_", seq_len(p))
+    rows <- lapply(mods, function(v) {
+        vip <- .vip_scores(fit, v)
+        p <- length(vip)
+        fn <- if (is.null(feature_names)) names(vip) else feature_names
+        if (length(fn) != p) {
+            stop(sprintf(
+                "feature_names length %d != %d features in modality %d.",
+                length(fn), p, v
+            ), call. = FALSE)
         }
-    }
-    if (length(feature_names) != p) {
-        stop(sprintf(
-            "feature_names length %d != %d features in modality %d.",
-            length(feature_names), p, modality
-        ))
-    }
-
-    n_top <- min(as.integer(n_top), p)
-    top_idx <- order(vip, decreasing = TRUE)[seq_len(n_top)]
-
-    df <- data.frame(
-        feature = factor(feature_names[top_idx],
-            levels = feature_names[top_idx[order(vip[top_idx])]]
-        ),
-        vip_score = vip[top_idx],
-        stringsAsFactors = FALSE
+        # Features removed by screen_top have zero loadings; leave them out.
+        k <- min(as.integer(n_top), sum(vip > 0))
+        o <- order(vip, decreasing = TRUE)[seq_len(k)]
+        data.frame(
+            modality_label = fit@mod_names[v],
+            feature = fn[o],
+            key = paste0(v, "___", fn[o]),
+            vip_score = unname(vip[o]),
+            highest_in = .highest_class(fit, v)[o],
+            stringsAsFactors = FALSE
+        )
+    })
+    df <- do.call(rbind, rows)
+    df$key <- factor(df$key, levels = rev(unique(df$key)))
+    df$modality_label <- factor(df$modality_label,
+        levels = fit@mod_names[mods]
     )
 
-    col_use <- .pal_woven[((modality - 1L) %% length(.pal_woven)) + 1L]
-
-    mod_label <- if (!is.null(fit@mod_names)) {
-        fit@mod_names[[modality]]
+    by_class <- color_by == "class" && !all(is.na(df$highest_in))
+    if (by_class) {
+        lv <- fit@Y_labels
+        df$highest_in <- factor(df$highest_in, levels = lv)
+        p_out <- ggplot2::ggplot(
+            df, ggplot2::aes(x = vip_score, y = key, fill = highest_in)
+        ) +
+            ggplot2::geom_col(width = 0.7) +
+            ggplot2::scale_fill_manual(
+                values = stats::setNames(.pal_n(length(lv)), lv),
+                name = "Highest in"
+            )
     } else {
-        paste0("Modality ", modality)
-    }
-
-    if (is.null(main)) {
-        main <- sprintf("VIP Scores - %s", mod_label)
-    }
-    subtitle <- sprintf("Top %d of %d features", n_top, p)
-
-    p_out <- ggplot2::ggplot(df, ggplot2::aes(x = vip_score, y = feature)) +
-        ggplot2::geom_col(fill = col_use, width = 0.7) +
-        ggplot2::geom_text(ggplot2::aes(label = sprintf("%.3f", vip_score)),
-            hjust = -0.1, size = 3, color = "gray30"
+        p_out <- ggplot2::ggplot(
+            df, ggplot2::aes(x = vip_score, y = key, fill = modality_label)
         ) +
-        ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.18))) +
-        ggplot2::labs(
-            x        = "VIP score",
-            y        = NULL,
-            title    = main,
-            subtitle = subtitle
-        ) +
-        .theme_woven() +
-        ggplot2::theme(panel.grid.major.y = ggplot2::element_blank())
-
-    # Only draw VIP = 1 line if it falls within the data range
-    if (max(df$vip_score) > 0.9) {
-        p_out <- p_out +
-            ggplot2::geom_vline(
-                xintercept = 1, linetype = "dashed",
-                color = "gray50", linewidth = 0.5
-            ) +
-            ggplot2::annotate("text",
-                x = 1, y = Inf,
-                label = "VIP = 1",
-                hjust = -0.1, vjust = 1.5,
-                size = 3, color = "gray45"
+            ggplot2::geom_col(width = 0.7) +
+            ggplot2::scale_fill_manual(
+                values = stats::setNames(
+                    .pal_n(fit@V)[mods], fit@mod_names[mods]
+                ),
+                guide = "none"
             )
     }
 
+    if (is.null(main)) {
+        main <- if (length(mods) == 1L) {
+            sprintf("Top features - %s", fit@mod_names[mods])
+        } else {
+            "Top features per modality"
+        }
+    }
+    subtitle <- if (by_class) {
+        "VIP score; colour = class in which the feature is highest"
+    } else {
+        "VIP score"
+    }
+
+    p_out <- p_out +
+        ggplot2::scale_y_discrete(labels = .axis_labels()) +
+        ggplot2::scale_x_continuous(
+            expand = ggplot2::expansion(mult = c(0, 0.05))
+        ) +
+        ggplot2::labs(x = "VIP score", y = NULL, title = main,
+            subtitle = subtitle
+        ) +
+        .theme_woven() +
+        ggplot2::theme(
+            panel.grid.major.y = ggplot2::element_blank(),
+            legend.position = "bottom"
+        )
+    if (length(mods) > 1L) {
+        p_out <- p_out + ggplot2::facet_wrap(~modality_label,
+            scales = "free", ncol = min(length(mods), 3L)
+        )
+    }
+    if (max(df$vip_score) > 0.9) {
+        p_out <- p_out + ggplot2::geom_vline(
+            xintercept = 1, linetype = "dashed",
+            color = "gray50", linewidth = 0.5
+        )
+    }
+    p_out
+}
+
+#' Plot which subjects have which modalities
+#'
+#' One bar per pattern of observed modalities (for example "RNA +
+#' Proteomics"), showing how many subjects have exactly that pattern,
+#' split by class. The subtitle compares the subjects a complete-case
+#' method can use (those observed in every modality, the anchors) with the
+#' subjects WOVEN scores. The class split shows whether the subjects a
+#' complete-case analysis would drop differ in their class mix.
+#'
+#' @param fit woven object from [woven()]
+#' @param max_patterns integer: show at most this many bars (default 12).
+#'   With many modalities there can be dozens of patterns; the least common
+#'   are combined into one "Other patterns" bar.
+#' @param main character: plot title (default "Modality coverage")
+#' @return a ggplot object (printed automatically; add layers with \code{+})
+#' @examples
+#' data(woven_example)
+#' fit <- woven(woven_example$X_missing,
+#'     Y = woven_example$Y, K = 3L,
+#'     verbose = FALSE
+#' )
+#' woven_plot_coverage(fit)
+#' @seealso [woven()], [woven_ess_retention()]
+#' @export
+woven_plot_coverage <- function(fit, max_patterns = 12L,
+                                main = "Modality coverage") {
+    .require_ggplot2()
+    stopifnot(methods::is(fit, "woven"))
+    obs <- fit@observed
+    if (length(obs) == 0L) {
+        stop("This fit does not record which modalities each subject has; ",
+            "refit it with woven >= 0.99.6.",
+            call. = FALSE
+        )
+    }
+    pattern <- apply(obs, 1L, function(r) {
+        if (!any(r)) "(no data)" else paste(colnames(obs)[r], collapse = " + ")
+    })
+    n_mod <- rowSums(obs)
+    is_anchor <- n_mod == ncol(obs)
+    pattern[is_anchor] <- "All modalities (anchors)"
+    # Anchors first, then the most common patterns. With many modalities
+    # there can be dozens of patterns, so beyond max_patterns the smallest
+    # are lumped together.
+    tab <- table(pattern)
+    lv <- names(tab)[order(
+        -(names(tab) %in% pattern[is_anchor]), -as.integer(tab), names(tab)
+    )]
+    if (length(lv) > max_patterns) {
+        other <- sprintf("Other patterns (%d)", length(lv) - max_patterns + 1L)
+        pattern[pattern %in% lv[max_patterns:length(lv)]] <- other
+        tab <- table(pattern)
+        lv <- c(lv[seq_len(max_patterns - 1L)], other)
+    }
+    group <- factor(as.character(fit@Y), levels = fit@Y_labels)
+    df <- as.data.frame(table(pattern = pattern, group = group),
+        responseName = "n", stringsAsFactors = FALSE
+    )
+    df <- df[df$n > 0L, , drop = FALSE]
+    df$pattern <- factor(df$pattern, levels = rev(lv))
+    df$group <- factor(df$group, levels = fit@Y_labels)
+    totals <- data.frame(
+        pattern = factor(names(tab), levels = rev(lv)),
+        Freq = as.integer(tab)
+    )
+    n_a <- sum(is_anchor)
+    n_scored <- sum(!is.na(fit@Z[, 1L]))
+    G <- length(fit@Y_labels)
+
+    p_out <- ggplot2::ggplot(
+        df, ggplot2::aes(x = n, y = pattern, fill = group)
+    ) +
+        ggplot2::geom_col(
+            width = 0.7, position = ggplot2::position_stack(reverse = TRUE)
+        ) +
+        ggplot2::geom_text(
+            data = totals, inherit.aes = FALSE,
+            ggplot2::aes(x = Freq, y = pattern, label = Freq),
+            hjust = -0.3, size = 3.5, color = "gray25"
+        ) +
+        ggplot2::scale_fill_manual(
+            values = stats::setNames(.pal_n(G), fit@Y_labels),
+            name = "Class"
+        ) +
+        ggplot2::scale_y_discrete(labels = .axis_labels(60L)) +
+        ggplot2::scale_x_continuous(
+            expand = ggplot2::expansion(mult = c(0, 0.1))
+        ) +
+        ggplot2::labs(
+            x = "Subjects", y = NULL, title = main,
+            subtitle = sprintf(
+                paste0(
+                    "Complete-case keeps %d of %d (%.0f%%); ",
+                    "WOVEN scores %d (%.0f%%)"
+                ),
+                n_a, fit@n, 100 * n_a / fit@n, n_scored,
+                100 * n_scored / fit@n
+            )
+        ) +
+        .theme_woven() +
+        ggplot2::theme(
+            panel.grid.major.y = ggplot2::element_blank(),
+            legend.position = "bottom"
+        )
     p_out
 }
 
@@ -274,10 +436,12 @@ woven_plot_loadings <- function(fit, dim = 1L, n_top = 15L,
         p <- length(w)
         nm <- feature_names[[v]]
         if (length(nm) != p) {
-            stop(sprintf("feature_names[[%d]] length %d != %d.", v, length(nm), p))
+            stop(sprintf(
+                "feature_names[[%d]] length %d != %d.", v, length(nm), p
+            ))
         }
 
-        n_show <- min(as.integer(n_top), p)
+        n_show <- min(as.integer(n_top), sum(w != 0))
         top_idx <- order(abs(w), decreasing = TRUE)[seq_len(n_show)]
 
         data.frame(
@@ -291,11 +455,14 @@ woven_plot_loadings <- function(fit, dim = 1L, n_top = 15L,
     })
     df <- do.call(rbind, rows)
 
-    # Reorder features within each modality panel by loading value
-    df$feature <- stats::reorder(
-        factor(df$feature),
-        df$loading,
-        FUN = function(x) x[1]
+    # Order features by loading within each panel; the key keeps features
+    # with the same name in different modalities apart.
+    df$key <- paste0(match(df$modality_label, mod_names), "___", df$feature)
+    df$key <- factor(df$key, levels = df$key[order(
+        match(df$modality_label, mod_names), df$loading
+    )])
+    df$modality_label <- factor(df$modality_label,
+        levels = mod_names[mod_seq]
     )
 
     if (is.null(main)) {
@@ -305,10 +472,15 @@ woven_plot_loadings <- function(fit, dim = 1L, n_top = 15L,
     n_mod <- length(mod_seq)
     ncol_facets <- min(n_mod, 3L)
 
-    ggplot2::ggplot(df, ggplot2::aes(x = loading, y = feature, fill = sign_str)) +
+    p_out <- ggplot2::ggplot(
+        df, ggplot2::aes(x = loading, y = key, fill = sign_str)
+    ) +
         ggplot2::geom_col(width = 0.7) +
         ggplot2::geom_vline(xintercept = 0, color = "gray30", linewidth = 0.4) +
-        ggplot2::facet_wrap(~modality_label, scales = "free_y", ncol = ncol_facets) +
+        ggplot2::facet_wrap(
+            ~modality_label, scales = "free", ncol = ncol_facets
+        ) +
+        ggplot2::scale_y_discrete(labels = .axis_labels()) +
         ggplot2::scale_fill_manual(
             values = c("positive" = col_pos, "negative" = col_neg),
             labels = c("positive" = "Positive", "negative" = "Negative")
@@ -317,98 +489,82 @@ woven_plot_loadings <- function(fit, dim = 1L, n_top = 15L,
             x = sprintf("Loading (Dimension %d)", dim),
             y = NULL,
             fill = NULL,
-            title = main
+            title = main,
+            subtitle = "Each panel has its own scale"
         ) +
         .theme_woven() +
         ggplot2::theme(
             panel.grid.major.y = ggplot2::element_blank(),
             legend.position    = "bottom"
         )
+    p_out
 }
 
-#' Plot variance explained per WOVEN latent dimension
+#' Plot the strength of each WOVEN latent dimension
 #'
-#' Bar chart of the proportion of variance explained per latent dimension
-#' (proportional to squared singular values), overlaid with a cumulative
-#' variance curve on a secondary axis. Use this to choose K and to show
-#' how much shared multi-omics signal is captured in the leading dimensions.
+#' Bar chart of each latent dimension's share of the squared supervised
+#' canonical correlations (\code{singular_values(fit)^2}), with the
+#' cumulative share as a line. A dimension with a small share adds little
+#' shared, class-related signal, which helps when choosing \code{K}. The
+#' shares describe the cross-modal alignment, not the variance of the data.
 #'
 #' @param fit woven object from [woven()]
-#' @param main character: plot title (default "Variance Explained")
+#' @param main character: plot title
 #' @return a ggplot object (printed automatically; add layers with \code{+})
 #' @examples
-#' set.seed(1)
-#' n <- 60
-#' p1 <- 30
-#' p2 <- 20
-#' K <- 4
-#' Y <- rep(1:2, each = n / 2)
-#' X1 <- matrix(rnorm(n * p1), n, p1)
-#' X2 <- matrix(rnorm(n * p2), n, p2)
-#' miss <- matrix(runif(n * 2) < 0.3, n, 2)
-#' for (i in which(rowSums(miss) == 2)) miss[i, sample(2, 1)] <- FALSE
-#' X1[miss[, 1], ] <- NA
-#' X2[miss[, 2], ] <- NA
-#' fit <- woven(list(X1, X2), Y = Y, K = K)
+#' data(woven_example)
+#' fit <- woven(woven_example$X_missing,
+#'     Y = woven_example$Y, K = 4L,
+#'     verbose = FALSE
+#' )
 #' woven_plot_variance(fit)
 #' @seealso [woven_plot_vip()], [woven_plot_loadings()]
 #' @export
-woven_plot_variance <- function(fit, main = "Variance Explained") {
+woven_plot_variance <- function(fit,
+                                main = "Strength of each latent dimension") {
     .require_ggplot2()
     stopifnot(methods::is(fit, "woven"))
     svals <- fit@singular_values
     K <- fit@K
-    prop_var <- svals^2 / sum(svals^2)
-    cumvar <- cumsum(prop_var)
-
+    share <- 100 * svals^2 / sum(svals^2)
     df <- data.frame(
         dim_int = seq_len(K),
-        pct_var = prop_var * 100,
-        cumulative = cumvar * 100,
-        stringsAsFactors = FALSE
+        pct_var = share,
+        cumulative = cumsum(share)
     )
-
     col_bar <- "#0072B2"
     col_cum <- "#D55E00"
 
-    ggplot2::ggplot(df, ggplot2::aes(x = dim_int)) +
+    p_out <- ggplot2::ggplot(df, ggplot2::aes(x = dim_int)) +
         ggplot2::geom_col(ggplot2::aes(y = pct_var),
-            fill = col_bar, width = 0.65, alpha = 0.9
+            fill = col_bar, width = 0.6
         ) +
-        ggplot2::geom_line(ggplot2::aes(y = cumulative),
-            color = col_cum, linewidth = 1.2
+        ggplot2::geom_text(
+            data = if (K <= 12L) df else df[0, , drop = FALSE],
+            ggplot2::aes(y = pct_var, label = sprintf("%.0f%%", pct_var)),
+            vjust = -0.5, size = 3.5, color = col_bar, fontface = "bold"
+        ) +
+        ggplot2::geom_line(
+            data = if (K > 1L) df else df[0, , drop = FALSE],
+            ggplot2::aes(y = cumulative), color = col_cum, linewidth = 0.9
         ) +
         ggplot2::geom_point(ggplot2::aes(y = cumulative),
-            color = col_cum, size = 3.2
-        ) +
-        ggplot2::geom_text(ggplot2::aes(y = pct_var / 2, label = sprintf("%.1f%%", pct_var)),
-            size = 3.2, color = "white", fontface = "bold"
+            color = col_cum, size = 2.5
         ) +
         ggplot2::scale_x_continuous(
-            breaks = seq_len(K),
-            labels = paste0("Dim ", seq_len(K))
+            breaks = if (K <= 15L) seq_len(K) else pretty(seq_len(K)),
+            labels = function(b) paste0("Dim ", b)
         ) +
         ggplot2::scale_y_continuous(
-            name     = "% Per Dimension",
-            limits   = c(0, 110),
-            breaks   = seq(0, 100, 20),
-            sec.axis = ggplot2::dup_axis(name = "Cumulative %")
+            limits = c(0, 108), breaks = seq(0, 100, 25),
+            labels = function(x) paste0(x, "%")
         ) +
         ggplot2::labs(
-            x     = "Latent Dimension",
-            title = main
-        ) +
-        ggplot2::annotate(
-            "text",
-            x = df$dim_int, y = df$cumulative + 4,
-            label = sprintf("%.0f%%", df$cumulative),
-            color = col_cum, size = 3.2, fontface = "bold"
+            x = NULL, y = "Share of squared canonical correlation",
+            title = main,
+            subtitle = "Bars: each dimension; line: cumulative"
         ) +
         .theme_woven() +
-        ggplot2::theme(
-            axis.title.y.left  = ggplot2::element_text(color = col_bar),
-            axis.text.y.left   = ggplot2::element_text(color = col_bar),
-            axis.title.y.right = ggplot2::element_text(color = col_cum),
-            axis.text.y.right  = ggplot2::element_text(color = col_cum)
-        )
+        ggplot2::theme(panel.grid.major.x = ggplot2::element_blank())
+    p_out
 }

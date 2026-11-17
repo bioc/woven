@@ -5,7 +5,7 @@
 # (subject) space this has a closed-form solution from one eigendecomposition.
 #
 # Derivation (anchor subjects only, n_a of them):
-#   M_v  = I + lambda_v L_a^(v) / n_a          graph-regularized metric, n_a x n_a
+#   M_v  = I + lambda_v L_a^(v) / n_a       graph-regularized metric, n_a x n_a
 #   IKY  = I + gamma_y K_Y                     label-augmented kernel, n_a x n_a
 #   objective: max sum_{v<u} tr(Z_v^T IKY Z_u)  s.t.  Z_v^T M_v Z_v = I_K
 #

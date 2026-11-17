@@ -1,6 +1,6 @@
 Package: woven
 Title: Weighted Omics View Embedding via Nystrom for Incomplete Multi-Omics Data
-Version: 0.99.5
+Version: 0.99.6
 Authors@R: c(
     person("Nathan", "Bresette",
            role = c("aut", "cre"),
@@ -45,6 +45,7 @@ Imports:
     MultiAssayExperiment,
     RANN,
     cluster,
+    grDevices,
     methods,
     stats,
     SummarizedExperiment,

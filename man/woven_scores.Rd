@@ -9,11 +9,19 @@ woven_scores(fit, X_list_new)
 \arguments{
 \item{fit}{woven object from [woven()]}
 
-\item{X_list_new}{list of V matrices (n_new x p_v), in the same modality
-and feature order as the training data, with entire rows set to NA for
-subjects missing that modality block; or a \code{MultiAssayExperiment}
-whose experiments have the training modality names (they are matched
-by name, and each experiment's features by row name when available).}
+\item{X_list_new}{the new subjects, as either
+\itemize{
+  \item a list named with the training modality names, of matrices or
+    data frames (subjects in rows). Blocks are matched by name, so
+    their order does not matter and a modality may be left out (every
+    new subject is then scored without it); blocks with row names are
+    matched by subject ID; features are matched by column name when
+    all training features are present;
+  \item an unnamed list of V matrices in training modality and feature
+    order, with all-NA rows for subjects missing a modality; or
+  \item a \code{MultiAssayExperiment} whose experiments have the
+    training modality names.
+}}
 }
 \value{
 numeric matrix n_new x K of consensus latent scores, with rownames

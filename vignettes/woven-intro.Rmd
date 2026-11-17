@@ -86,6 +86,35 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
 BiocManager::install("woven")
 ```
 
+# Quick start
+
+One call fits the model. The data are a named list with one table per assay
+(subjects in rows, features in columns) and `Y` holds the class labels.
+woven reports what it found in the data, each step as it runs, and how many
+subjects it scored compared with a complete-case analysis.
+
+```{r quick-fit}
+library(woven)
+data(woven_example)
+fit_ex <- woven(woven_example$X_missing, Y = woven_example$Y, K = 3L)
+```
+
+Every plot goes through `plot()`, and the labels are stored in the fit, so
+they do not need to be passed again.
+
+```{r quick-plots, fig.cap = "Latent space of the example data. Filled points are anchors; open points are subjects scored from a subset of their blocks."}
+plot(fit_ex) # latent space by class
+```
+
+```{r quick-features, fig.width = 9, fig.height = 5, fig.cap = "Top features of each block. Bars are coloured by the class in which the feature is highest."}
+plot(fit_ex, type = "features", n_top = 10)
+woven_top_features(fit_ex, n = 3)
+```
+
+The other types are `"coverage"` (which subjects have which blocks),
+`"loadings"` and `"variance"`; each also has its own `woven_plot_*()`
+function with more options.
+
 # A real block-missing example: adrenocortical carcinoma
 
 `r Biocpkg("MultiAssayExperiment")` is the Bioconductor container for several
@@ -102,7 +131,6 @@ proteins), and use the published C1A/C1B transcriptional subtype as the class
 label.
 
 ```{r acc-load, message = FALSE, warning = FALSE}
-library(woven)
 library(MultiAssayExperiment)
 data(miniACC)
 
@@ -155,11 +183,17 @@ colData(acc)$WOVEN2 <- scores[, 2]
 head(as.data.frame(colData(acc))[, c("C1A.C1B", "vital_status", "WOVEN1")])
 ```
 
-```{r acc-plot, fig.cap = "WOVEN latent space for the ACC tumours. Solid points are anchors; faded points are tumours without RPPA data, scored from RNA-seq and miRNA-seq."}
-plot(fit, labels = acc$C1A.C1B)
+```{r acc-plot, fig.cap = "WOVEN latent space for the ACC tumours. Filled points are anchors; open points are tumours without RPPA data, scored from RNA-seq and miRNA-seq."}
+plot(fit)
 ```
 
 ## Coverage
+
+```{r acc-coverage-plot, fig.cap = "Tumours by the blocks they have, split by subtype. A complete-case analysis uses only the top bar."}
+plot(fit, type = "coverage")
+```
+
+The same numbers as a table:
 
 ```{r acc-coverage}
 n_total <- nrow(colData(acc))
@@ -205,38 +239,64 @@ table(
 ```
 
 This is one random split, shown to illustrate the workflow; a proper
-estimate repeats it, for example with cross-validation, and refits the
-model in every fold.
+estimate repeats it with cross-validation, refitting the model in every
+fold, which is what `woven_tune()` does (see Tuning).
 
 ## Features
 
 Projection matrices are linear, so each feature has a loading on each latent
-dimension. `woven_plot_vip()` ranks features by a variable importance in
-projection (VIP) score and `woven_plot_loadings()` shows signed loadings.
+dimension. `woven_top_features()` and `plot(fit, type = "features")` rank
+features within each block by a variable importance in projection (VIP)
+score, which combines a feature's loadings over all dimensions; a VIP above
+1 is above the block average. Each feature is also labelled with the class
+in which it is highest. `woven_plot_loadings()` shows signed loadings on one
+dimension.
 
-```{r acc-vip, fig.cap = "Top genes by VIP score."}
-woven_plot_vip(fit, modality = "RNASeq2GeneNorm", n_top = 15)
+```{r acc-top}
+woven_top_features(fit, n = 5, modality = "RNASeq2GeneNorm")
+```
+
+```{r acc-vip, fig.width = 10, fig.height = 5, fig.cap = "Top features of each block by VIP score, coloured by the subtype in which they are highest."}
+plot(fit, type = "features", n_top = 10)
 ```
 
 ```{r acc-loadings, fig.width = 10, fig.height = 5, fig.cap = "Top signed loadings on dimension 1 in each block."}
 woven_plot_loadings(fit, dim = 1L, n_top = 8)
 ```
 
-# Input as a list of matrices
+# Input as separate tables
 
-Without a MultiAssayExperiment, pass a named list of matrices with subjects
-in rows (in the same order in every matrix) and features in columns. A
-subject missing a block has that whole row set to `NA`. The package ships a
-small simulated example in this format (see `?woven_example`).
+Without a MultiAssayExperiment, pass a named list with one table (matrix or
+data frame) per assay, subjects in rows and features in columns. Most often
+each table covers only the subjects that assay was run on. Give the tables
+row names (subject IDs) and woven matches them: a subject absent from a
+table is treated as missing that block, and the tables may list subjects in
+any order. Labels can likewise be a vector named by subject ID.
 
-```{r list-fit}
-data(woven_example)
-lapply(woven_example$X_missing, dim)
-fit_sim <- woven(woven_example$X_missing,
-    Y = woven_example$Y, K = 3L,
-    verbose = FALSE
-)
+Here the example data are split into one table per assay, each keeping only
+its measured subjects in shuffled order:
+
+```{r list-tables}
+set.seed(1)
+tables <- lapply(woven_example$X_missing, function(X) {
+    X <- X[!is.na(X[, 1]), ]
+    X[sample(nrow(X)), ]
+})
+vapply(tables, nrow, integer(1))
+labels <- setNames(woven_example$Y, rownames(woven_example$X_missing$RNA))
+fit_sim <- woven(tables, Y = labels, K = 3L, verbose = FALSE)
 fit_sim
+```
+
+Tables without row names must instead share the same rows in the same
+order, with a subject missing a block given an all-`NA` row; this is the
+form of `woven_example$X_missing` (see `?woven_example`).
+
+New subjects are given the same way. A named list may also leave blocks
+out, so subjects with RNA only can be classified directly:
+
+```{r list-predict}
+head(woven_predict(fit_sim, list(RNA = woven_example$X_complete$RNA[1:5, ])))
 ```
 
 ## Pre-processing
@@ -258,7 +318,7 @@ Do not impute missing blocks; leave their rows as `NA`.
 
 ```{r metrics}
 set.seed(1) # NMI uses k-means, which is random
-woven_metrics(fit_sim, woven_example$Y)
+woven_metrics(fit_sim)
 ```
 
 `woven_metrics()` reports the silhouette width and Davies-Bouldin index of
@@ -273,7 +333,7 @@ reports the mean distance from its full-fit score.
 
 ```{r nystrom}
 set.seed(1) # the held-out anchors are drawn at random
-woven_nystrom_error(fit_sim, woven_example$X_missing, n_loo = 10L)
+woven_nystrom_error(fit_ex, woven_example$X_missing, n_loo = 10L)
 ```
 
 `woven_plot_variance()` shows how the canonical correlations are spread over
@@ -288,16 +348,43 @@ woven_plot_variance(fit_sim)
 `gamma_y` sets the weight of the labels (0 gives unsupervised SUMCOR),
 `lambdas` the weight of the graph Laplacians, and `ridge_w` and `screen_top`
 control the projection matrices when a block has many more features than
-there are anchors. Choose them by cross-validated classification error:
-split the anchors into folds, fit `woven()` on the training subjects of each
-fold (graphs included, so held-out subjects never enter the fit), and score
-the held-out anchors with `woven_predict()`.
+there are anchors. The defaults leave `ridge_w` and `screen_top` off, which
+can overfit high-dimensional blocks, so choose them by cross-validation.
 
-When you fit the same subjects several times, for example to compare
-settings on the full data or run a sensitivity analysis, the graphs do not
-depend on these settings, so build them once with `woven_precompute()` and
-pass them to every fit. Precomputed graphs cover exactly the subjects they
-were built on, so they cannot be reused for cross-validation folds.
+`woven_tune()` does this in one call. It splits the anchors into
+class-stratified folds, refits everything on each fold's training subjects
+(standardization and graphs included), classifies the held-out anchors, and
+picks the setting with the lowest balanced error rate. It then refits all
+subjects with that setting.
+
+```{r tune}
+set.seed(1) # folds are random
+tune <- woven_tune(acc, Y = "C1A.C1B", K = 2L, verbose = FALSE)
+tune
+```
+
+```{r tune-plot, fig.width = 9, fig.height = 4, fig.cap = "Held-out balanced error rate over the tuning grid for the ACC data. The selected setting is outlined."}
+plot(tune)
+```
+
+`tune$fit` is the final model, used like any other fit:
+
+```{r tune-fit}
+fit_tuned <- tune$fit
+woven_top_features(fit_tuned, n = 3)
+```
+
+The error rate of the selected setting is the minimum over the grid, so it
+is somewhat optimistic; for an unbiased estimate, run `woven_tune()` inside
+an outer cross-validation loop or on a separate test set.
+
+## Refitting the same subjects
+
+When you fit the same subjects several times, for example in a sensitivity
+analysis, the graphs do not depend on the settings above, so build them once
+with `woven_precompute()` and pass them to every fit. Precomputed graphs
+cover exactly the subjects they were built on, so they cannot be reused for
+cross-validation folds (`woven_tune()` builds each fold's graphs itself).
 
 ```{r precompute}
 pc <- woven_precompute(woven_example$X_missing)
@@ -310,20 +397,9 @@ fits <- lapply(c(0.5, 5), function(g) {
 vapply(fits, function(f) singular_values(f)[1], numeric(1))
 ```
 
-`woven_precompute()` also accepts a MultiAssayExperiment, converted the same
-way as in `woven()`, so the ACC data above can be tuned the same way:
-
-```{r precompute-mae}
-pc_acc <- woven_precompute(acc)
-fit_acc <- woven(acc,
-    Y = "C1A.C1B", K = 2L, gamma_y = 5,
-    precomp = pc_acc, verbose = FALSE
-)
-singular_values(fit_acc)
-```
-
-`woven_precompute()` records whether it scaled the data, and `woven()`
-stops if its own `scale` setting differs.
+`woven_precompute()` also accepts a MultiAssayExperiment. It records
+whether it scaled the data, and `woven()` stops if its own `scale` setting
+differs.
 
 # Limitations
 
@@ -361,7 +437,7 @@ singular_values(fit)
 ```
 
 New subjects are scored with `woven_scores()` and classified with
-`woven_predict()`, from either a list of matrices or a MultiAssayExperiment.
+`woven_predict()`, from a list of tables or a MultiAssayExperiment.
 
 # References
 

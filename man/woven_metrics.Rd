@@ -4,13 +4,13 @@
 \alias{woven_metrics}
 \title{Convenience wrapper: compute core metrics directly from a woven fit}
 \usage{
-woven_metrics(fit, labels)
+woven_metrics(fit, labels = NULL)
 }
 \arguments{
 \item{fit}{woven object from [woven()]}
 
 \item{labels}{integer, factor, or character vector of length n with subgroup
-labels for all subjects (same Y passed to [woven()])}
+labels for all subjects. Defaults to the labels the model was fit with.}
 }
 \value{
 named numeric vector with elements \code{Silhouette},
@@ -35,7 +35,7 @@ X1[miss[, 1], ] <- NA
 X2[miss[, 2], ] <- NA
 fit <- woven(list(X1, X2), Y = Y, K = K)
 set.seed(1) # NMI uses k-means
-woven_metrics(fit, Y)
+woven_metrics(fit)
 }
 \seealso{
 [woven_silhouette()], [woven_davies_bouldin()], [woven_nmi()],
