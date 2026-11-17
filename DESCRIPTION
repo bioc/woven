@@ -29,6 +29,9 @@ Description: Supervised multi-omics integration for block-missing
     block is imputed. The effective sample size (ESS) retention, the fraction
     of subjects a method can score, is therefore the fraction with at least
     one observed modality, rather than the complete-case fraction.
+    woven_tune() chooses the regularization settings by cross-validated
+    balanced error rate, and the fitted model is summarized by plots and a
+    table of the top features per modality.
 License: MIT + file LICENSE
 Encoding: UTF-8
 RoxygenNote: 7.3.3

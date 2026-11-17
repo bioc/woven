@@ -248,8 +248,9 @@ Projection matrices are linear, so each feature has a loading on each latent
 dimension. `woven_top_features()` and `plot(fit, type = "features")` rank
 features within each block by a variable importance in projection (VIP)
 score, which combines a feature's loadings over all dimensions; a VIP above
-1 is above the block average. Each feature is also labelled with the class
-in which it is highest. `woven_plot_loadings()` shows signed loadings on one
+1 is above the block average (features removed by `screen_top` count towards
+that average with a VIP of 0). Each feature is also labelled with the class in
+which it is highest. `woven_plot_loadings()` shows signed loadings on one
 dimension.
 
 ```{r acc-top}

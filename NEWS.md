@@ -64,6 +64,8 @@
   `requireNamespace()` check, since MultiAssayExperiment is in Imports.
 * Source and roxygen lines wrapped to 80 characters. No change in results
   or error messages.
+* README, DESCRIPTION and the vignette describe `woven_tune()`, and
+  `?woven_top_features` notes how `screen_top` affects the VIP scale.
 
 # woven 0.99.5
 

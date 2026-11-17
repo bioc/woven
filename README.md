@@ -29,6 +29,10 @@ least one data type is dropped, and no missing block is imputed.
 - Supervised: class labels enter the cross-covariance, so latent dimensions
   are both shared across data types and class-discriminative.
 - Closed form: one eigendecomposition; no iterations or random restarts.
+- Tuned by cross-validation: `woven_tune()` chooses the ridge, feature
+  screening and supervision settings by held-out balanced error rate. The
+  defaults leave ridge and screening off, so tuning usually improves
+  accuracy on high-dimensional data.
 - Interpretable: one linear projection matrix per data type.
 - Bioconductor input: takes a `MultiAssayExperiment` directly, or separate
   tables matched by subject ID.

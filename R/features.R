@@ -47,7 +47,9 @@
 #' so its mean square is 1 within a modality (so values above 1 are above
 #' average). It ranks features within a modality; it is not comparable
 #' across modalities with different numbers of features. Features removed
-#' by \code{screen_top} have zero loadings and a VIP of 0.
+#' by \code{screen_top} have zero loadings and a VIP of 0; because the mean
+#' square is taken over all of a modality's features, the features kept
+#' score higher when screening removes many of them.
 #'
 #' @param fit a woven object from [woven()]
 #' @param n integer: number of features per modality (default 10). Use
